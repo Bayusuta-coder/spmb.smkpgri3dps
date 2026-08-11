@@ -1,0 +1,22 @@
+.env
+node_modules/
+dist/
+coverage/
+*.log
+
+# Frontend artifacts
+frontend-user/.env
+frontend-admin/.env
+frontend-user/dist
+frontend-admin/dist
+
+# Prisma generated client
+backend/node_modules
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Jangan abaikan folder migrations Prisma (perlu di-commit)
+!backend/prisma/migrations/

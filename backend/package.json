@@ -1,0 +1,62 @@
+{
+  "name": "spmb-smk-pgri3-backend",
+  "version": "0.1.0",
+  "description": "SPMB Online SMK PGRI 3 Denpasar - REST API",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "prebuild": "node -e \"try{require('fs').rmSync('tsconfig.tsbuildinfo',{force:true})}catch{}\"",
+    "dev": "nest start --watch",
+    "predev": "node -e \"try{require('fs').rmSync('tsconfig.tsbuildinfo',{force:true})}catch{}\"",
+    "start": "node dist/main",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "prisma:format": "prisma format",
+    "seed": "ts-node prisma/seed.ts",
+    "seed:run": "ts-node prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.3.10",
+    "@nestjs/config": "^3.2.3",
+    "@nestjs/core": "^10.3.10",
+    "@nestjs/jwt": "^10.2.0",
+    "@nestjs/passport": "^10.0.3",
+    "@nestjs/platform-express": "^10.3.10",
+    "@nestjs/swagger": "^7.4.0",
+    "@nestjs/throttler": "^6.1.1",
+    "@prisma/client": "^5.18.0",
+    "bcrypt": "^5.1.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "exceljs": "^4.4.0",
+    "helmet": "^7.1.0",
+    "nodemailer": "^6.9.15",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "pdfkit": "^0.19.1",
+    "qrcode": "^1.5.4",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.2",
+    "@nestjs/schematics": "^10.1.2",
+    "@types/bcrypt": "^5.0.2",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.15",
+    "@types/nodemailer": "^6.4.15",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/pdfkit": "^0.17.6",
+    "@types/qrcode": "^1.5.6",
+    "prisma": "^5.18.0",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.5.4"
+  }
+}

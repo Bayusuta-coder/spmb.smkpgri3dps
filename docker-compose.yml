@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: spmb_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - spmb_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: spmb_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      BACKEND_PORT: ${BACKEND_PORT}
+      FRONTEND_USER_ORIGIN: ${FRONTEND_USER_ORIGIN}
+      FRONTEND_ADMIN_ORIGIN: ${FRONTEND_ADMIN_ORIGIN}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+      UPLOADS_DIR: ${UPLOADS_DIR}
+    ports:
+      - "${BACKEND_PORT}:4000"
+    volumes:
+      - "./backend:/app"
+      - "/app/node_modules"
+      # storage lokal untuk PDF bukti pendaftaran ulang + foto berita/pengumuman.
+      # Struktur di-host: ./backend/uploads/spmb/{berita,pengumuman,REG-*.pdf}
+      # dst. => mount root folder 'spmb' (bukan 'uploads') agar path di container
+      # sama persis dengan UPLOADS_DIR=/app/uploads/spmb.
+      - "./backend/uploads/spmb:${UPLOADS_DIR}"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npx prisma db push --skip-generate || echo 'schema push skipped'; npx prisma generate && npm run seed && npm run dev"
+
+  adminer:
+    image: adminer:4
+    container_name: spmb_adminer
+    restart: unless-stopped
+    ports:
+      - "${ADMINER_PORT}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  spmb_db_data:

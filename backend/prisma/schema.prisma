@@ -1,0 +1,348 @@
+// SPMB SMK PGRI 3 Denpasar - Prisma schema
+// Modular foundation: RBAC dinamis + entitas SPMB.
+// Dirancang agar ke depan bisa berkembang jadi platform manajemen sekolah.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// RBAC DINAMIS
+// ============================================================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roles                    UserRole[]
+  pendaftar                Pendaftar[]   @relation("PendaftarUser")
+  auditLogs                AuditLog[]
+  verifiedPendaftar        Pendaftar[]   @relation("PendaftarVerifiedBy")
+  approvedPendaftar        Pendaftar[]   @relation("PendaftarApprovedBy")
+  verifiedPembayaran       Pembayaran[]  @relation("PembayaranVerifiedBy")
+  confirmedDaftarUlang     Pendaftar[]   @relation("PendaftarConfirmedBy")
+  deletedJurusan           Jurusan[]     @relation("JurusanDeletedBy")
+  beritaDibuat             Berita[]      @relation("BeritaCreatedBy")
+  pengumumanDibuat         Pengumuman[]  @relation("PengumumanCreatedBy")
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  module      String
+  action      String
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ============================================================================
+// AUDIT LOG
+// ============================================================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  module     String
+  entityType String?
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([module])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// SPMB - JURUSAN & GELOMBANG
+// ============================================================================
+
+model Jurusan {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  name      String
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  // soft delete: Jurusan yang pernah dipilih pendaftar tidak boleh hilang
+  deletedAt DateTime?
+  deletedByUserId String?
+
+  kuota          KuotaGelombang[]
+  pendaftar      Pendaftar[]
+  deletedByUser  User?            @relation("JurusanDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([deletedAt])
+  @@map("jurusan")
+}
+
+model Gelombang {
+  id        String    @id @default(cuid())
+  name      String
+  startDate DateTime
+  endDate   DateTime?
+  isActive  Boolean   @default(false)
+  // Jadwal pelaksanaan daftar ulang FISIK di sekolah (untuk QR/info publik).
+  // Opsional — bisa diisi belakangan oleh superadmin.
+  tanggalDaftarUlang DateTime?
+  jamDaftarUlang     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  kuota     KuotaGelombang[]
+  pendaftar Pendaftar[]
+
+  @@index([isActive])
+  @@index([startDate])
+  @@map("gelombang_spmb")
+}
+
+model KuotaGelombang {
+  id          String @id @default(cuid())
+  gelombangId String
+  jurusanId   String
+  quota       Int    @default(0)
+
+  gelombang Gelombang @relation(fields: [gelombangId], references: [id], onDelete: Cascade)
+  jurusan   Jurusan   @relation(fields: [jurusanId], references: [id], onDelete: Cascade)
+
+  @@unique([gelombangId, jurusanId])
+  @@map("kuota_gelombang")
+}
+
+// ============================================================================
+// SPMB - PENDAFTAR & ALUR
+// ============================================================================
+
+enum StatusPendaftar {
+  MENUNGGU_VERIFIKASI // berkas baru masuk, menunggu admin verifikasi
+  DITOLAK // ditolak admin
+  LOLOS_MENUNGGU_DAFTAR_ULANG // lolos verifikasi berkas, harus input pembayaran
+  MENUNGGU_VERIFIKASI_PEMBAYARAN // siswa sudah submit pembayaran, menunggu TU cek
+  SISWA_AKTIF // pembayaran diverifikasi TU + admin approve final
+}
+
+enum JenisKelamin {
+  L
+  P
+}
+
+model Pendaftar {
+  id                 String          @id @default(cuid())
+  registrationNumber String          @unique
+  namaLengkap        String
+  jenisKelamin       JenisKelamin
+  tempatLahir        String
+  tanggalLahir       DateTime
+  nisn               String
+  sekolahAsal        String
+  alamat             String
+  noTelp             String
+  email              String? // untuk notifikasi email otomatis ke siswa
+  jumlahNilaiUn      Decimal         @db.Decimal(6, 2)
+  prestasi           String?
+  namaIbu            String
+  noTelpOrtu         String
+  jurusanId          String
+  gelombangId        String
+  status             StatusPendaftar @default(MENUNGGU_VERIFIKASI)
+
+  // audit fields
+  verifiedById  String?
+  verifiedAt    DateTime?
+  rejectionNote String?
+  approvedById  String?
+  approvedAt    DateTime?
+
+  // PDF & QR — dihasilkan saat approve final
+  pdfPath        String?
+  pdfGeneratedAt DateTime?
+  pdfSignature   String? @unique // token random di-encode ke QR (lookup pendaftar)
+
+  // Konfirmasi kehadiran daftar ulang fisik (di-scan dari QR oleh TU/admin)
+  daftarUlangConfirmedAt      DateTime?
+  daftarUlangConfirmedByUserId String?
+
+  // opsional: jika suatu saat dibuat akun siswa otomatis
+  userId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jurusan              Jurusan   @relation(fields: [jurusanId], references: [id])
+  gelombang            Gelombang @relation(fields: [gelombangId], references: [id])
+  verifiedBy           User?     @relation("PendaftarVerifiedBy", fields: [verifiedById], references: [id])
+  approvedBy           User?     @relation("PendaftarApprovedBy", fields: [approvedById], references: [id])
+  daftarUlangConfirmedBy User?   @relation("PendaftarConfirmedBy", fields: [daftarUlangConfirmedByUserId], references: [id])
+  user                 User?     @relation("PendaftarUser", fields: [userId], references: [id])
+  pembayaran           Pembayaran?
+
+  @@index([status])
+  @@index([jurusanId])
+  @@index([gelombangId])
+  @@index([nisn])
+  @@index([email])
+  @@index([pdfSignature])
+  @@map("pendaftar_spmb")
+}
+
+// ============================================================================
+// SPMB - PEMBAYARAN (manual transfer, tanpa payment gateway)
+// ============================================================================
+
+enum StatusPembayaran {
+  MENUNGGU_VERIFIKASI
+  TERVERIFIKASI
+  BELUM_DITEMUKAN
+}
+
+model Pembayaran {
+  id              String           @id @default(cuid())
+  pendaftarId     String           @unique
+  nominal         Decimal          @db.Decimal(12, 2)
+  tanggalTransfer DateTime
+  namaPengirim    String
+  catatan         String?
+  status          StatusPembayaran @default(MENUNGGU_VERIFIKASI)
+
+  verifiedById String?
+  verifiedAt   DateTime?
+  note         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pendaftar  Pendaftar @relation(fields: [pendaftarId], references: [id], onDelete: Cascade)
+  verifiedBy User?     @relation("PembayaranVerifiedBy", fields: [verifiedById], references: [id])
+
+  @@index([status])
+  @@map("pembayaran_spmb")
+}
+
+// ============================================================================
+// EMAIL LOG (opsional: lacak email yang dikirim untuk audit)
+// ============================================================================
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  to          String
+  subject     String
+  body        String
+  status      String // sent | failed
+  error       String?
+  relatedType String?
+  relatedId   String?
+  createdAt   DateTime @default(now())
+
+  @@index([to])
+  @@index([relatedType, relatedId])
+  @@map("email_logs")
+}
+
+// ============================================================================
+// KONTEN - BERITA & PENGUMUMAN
+// ============================================================================
+
+enum StatusBerita {
+  DRAFT
+  PUBLISHED
+}
+
+model Berita {
+  id          String       @id @default(cuid())
+  judul       String
+  slug        String       @unique
+  foto        String // path relatif dari UPLOADS_DIR, mis. "berita/abc123.jpg"
+  isi         String // teks isi (plain text — newline dipertahankan saat render)
+  hashtag     String[] // Postgres text[] — list hashtag
+  status      StatusBerita @default(DRAFT)
+  publishedAt DateTime? // di-set saat pertama publish, untuk sort publik yang stabil
+
+  createdByUserId String
+  createdBy       User     @relation("BeritaCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  @@index([status, publishedAt])
+  @@index([deletedAt])
+  @@map("berita")
+}
+
+model Pengumuman {
+  id     String  @id @default(cuid())
+  judul  String
+  foto   String // path relatif dari UPLOADS_DIR
+  aktif  Boolean @default(true)
+  urutan Int     @default(0) // sort di carousel, lower = lebih dulu
+
+  createdByUserId String
+  createdBy       User     @relation("PengumumanCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  @@index([aktif, urutan])
+  @@index([deletedAt])
+  @@map("pengumuman")
+}
