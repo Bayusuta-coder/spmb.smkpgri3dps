@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
   GraduationCap,
-  Wallet,
   CalendarDays,
   BookOpen,
   Shield,
@@ -16,6 +15,10 @@ import {
   X,
   Newspaper,
   Megaphone,
+  Wallet,
+  UserCircle,
+  Settings as SettingsIcon,
+  Archive,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import logoSmk from '../assets/logosmk.png';
@@ -29,7 +32,6 @@ const NAV: Array<{
 }> = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/pendaftar', label: 'Pendaftar', icon: GraduationCap, permission: 'spmb.view' },
-  { to: '/pembayaran', label: 'Pembayaran', icon: Wallet, permission: 'payment.view' },
   { to: '/gelombang', label: 'Gelombang', icon: CalendarDays, permission: 'gelombang.view' },
   { to: '/jurusan', label: 'Jurusan', icon: BookOpen, permission: 'jurusan.view' },
   { to: '/statistik', label: 'Statistik', icon: BarChart3, permission: 'statistik.view' },
@@ -38,6 +40,15 @@ const NAV: Array<{
   { to: '/audit', label: 'Audit Log', icon: ScrollText, permission: 'audit.view' },
   { to: '/berita', label: 'Berita', icon: Newspaper, permission: 'berita.view' },
   { to: '/pengumuman', label: 'Pengumuman', icon: Megaphone, permission: 'pengumuman.view' },
+  // Bendahara menu: rekap pendapatan (permission spmb.bayar sudah dimiliki Bendahara + Admin)
+  // URL tetap /rekap-pendapatan supaya tidak breaking existing link, hanya label menu yang diganti.
+  { to: '/rekap-pendapatan', label: 'Bendahara', icon: Wallet, permission: 'spmb.bayar' },
+  // Pengaturan Laporan — admin-only (settings.view)
+  { to: '/pengaturan-laporan', label: 'Pengaturan Laporan', icon: SettingsIcon, permission: 'settings.view' },
+  // Arsip & Reset Tahun Ajaran — Superadmin only
+  { to: '/tahun-ajaran', label: 'Arsip Tahun Ajaran', icon: Archive, roles: ['Superadmin'] },
+  // Profile + Verifikasi WhatsApp sendiri (semua role boleh — selalu tampil)
+  { to: '/profile', label: 'Profile & WhatsApp', icon: UserCircle },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

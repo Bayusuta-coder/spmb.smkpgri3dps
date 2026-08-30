@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, History, ListChecks } from 'lucide-react';
+import { Plus, History, ListChecks, Trash2, AlertTriangle, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import HistoryTab from '../components/HistoryTab';
 
 type Tab = 'list' | 'history';
 
@@ -21,6 +22,13 @@ export default function GelombangPage() {
     isActive: true,
     kuota: [] as { jurusanId: string; quota: number }[],
   });
+  // Gelombang yang sedang dikonfirmasi untuk dihapus (null = modal tertutup).
+  // Pakai state terpisah (bukan langsung panggil api.delete) supaya kita bisa
+  // menampilkan modal konfirmasi AnimatePresence + handle error 400 (kalau
+  // gelombang masih ada pendaftar terkait) dari backend dengan toast yang
+  // ramah.
+  const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -64,6 +72,26 @@ export default function GelombangPage() {
       load();
     } catch (e: any) {
       toast.error(e.message);
+    }
+  };
+
+  const onConfirmDelete = async () => {
+    if (!confirmDelete) return;
+    try {
+      setDeleting(true);
+      const res = await api.delete(`/gelombang/${confirmDelete.id}`);
+      toast.success(`Gelombang "${res.data?.name ?? confirmDelete.name}" berhasil dihapus`);
+      setConfirmDelete(null);
+      load();
+    } catch (e: any) {
+      // Backend akan throw 400 dengan pesan ramah kalau masih ada pendaftar
+      // terkait. Axios error: e.response.data.message berisi string panjang
+      // yang sudah include count + sample nomor pendaftaran.
+      const msg =
+        e.response?.data?.message ?? e.message ?? 'Gagal menghapus gelombang';
+      toast.error(msg, { duration: 6000 });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -218,6 +246,16 @@ export default function GelombangPage() {
                           {g.isActive ? 'Nonaktifkan' : 'Aktifkan'}
                         </button>
                       )}
+                      {hasPermission('gelombang.manage') && (
+                        <button
+                          onClick={() => setConfirmDelete(g)}
+                          className="btn-ghost text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                          title="Hapus gelombang (gagal kalau masih ada pendaftar terkait)"
+                        >
+                          <Trash2 size={14} />
+                          Hapus
+                        </button>
+                      )}
                     </div>
                   </div>
                   {g.kuota?.length > 0 && (
@@ -241,101 +279,82 @@ export default function GelombangPage() {
           <HistoryTab key="history" module="gelombang" title="Riwayat Penambahan & Perubahan Gelombang" />
         )}
       </AnimatePresence>
+
+      {/* Modal konfirmasi hapus gelombang — pakai AnimatePresence agar
+          transisi buka/tutup halus. Aksi destructive, jadi default fokus
+          ke tombol Batal (Escape-key friendly). */}
+      <AnimatePresence>
+        {confirmDelete && (
+          <motion.div
+            key="confirm-delete-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={() => !deleting && setConfirmDelete(null)}
+          >
+            <motion.div
+              key="confirm-delete-card"
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="relative w-full max-w-md rounded-lg bg-white p-6 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setConfirmDelete(null)}
+                disabled={deleting}
+                className="absolute right-3 top-3 p-1 text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                aria-label="Tutup"
+              >
+                <X size={18} />
+              </button>
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100">
+                  <AlertTriangle className="text-red-600" size={20} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    Hapus Gelombang?
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Anda yakin ingin menghapus gelombang{' '}
+                    <b>"{confirmDelete.name}"</b>? Tindakan ini{' '}
+                    <span className="font-semibold text-red-600">
+                      tidak dapat dibatalkan
+                    </span>{' '}
+                    dan akan tercatat di riwayat perubahan.
+                  </p>
+                  <div className="mt-3 rounded-md bg-amber-50 border border-amber-200 p-2 text-xs text-amber-800">
+                    <b>Penting:</b> Penghapusan akan ditolak oleh sistem jika
+                    gelombang ini masih memiliki pendaftar yang terkait. Pastikan
+                    tidak ada pendaftar aktif di gelombang ini sebelum menghapus.
+                  </div>
+                </div>
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(null)}
+                  disabled={deleting}
+                  className="btn-ghost"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={onConfirmDelete}
+                  disabled={deleting}
+                  className="btn-primary bg-red-600 hover:bg-red-700 disabled:bg-red-300"
+                >
+                  {deleting ? 'Menghapus…' : 'Ya, Hapus Gelombang'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
-  );
-}
-
-/**
- * Tab history bersama (dipakai Gelombang & Jurusan).
- * Mengambil dari /audit-logs?module=...
- */
-function HistoryTab({ module, title }: { module: string; title: string }) {
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await api.get('/audit-logs', {
-          params: { module, pageSize: 100 },
-        });
-        setItems(res.data.items);
-      } catch (e: any) {
-        toast.error(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [module]);
-
-  const actionLabel = (a: string) => {
-    switch (a) {
-      case 'gelombang.created': return 'Tambah Gelombang';
-      case 'gelombang.updated': return 'Edit Gelombang';
-      case 'gelombang.deactivated': return 'Nonaktifkan Gelombang';
-      case 'jurusan.created': return 'Tambah Jurusan';
-      case 'jurusan.updated': return 'Edit Jurusan';
-      case 'jurusan.deleted': return 'Hapus Jurusan';
-      case 'jurusan.restored': return 'Restore Jurusan';
-      default: return a;
-    }
-  };
-
-  const actionColor = (a: string) => {
-    if (a.endsWith('.deleted') || a.endsWith('.deactivated')) return 'bg-red-100 text-red-700';
-    if (a.endsWith('.created')) return 'bg-emerald-100 text-emerald-700';
-    if (a.endsWith('.restored')) return 'bg-blue-100 text-blue-700';
-    return 'bg-slate-100 text-slate-700';
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.18 }}
-    >
-      <p className="mb-3 text-sm text-slate-600">{title}</p>
-      <div className="card overflow-hidden p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="border-b border-slate-200 bg-slate-50">
-              <tr>
-                <th className="table-th">Waktu</th>
-                <th className="table-th">User</th>
-                <th className="table-th">Aksi</th>
-                <th className="table-th">Detail</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr><td colSpan={4} className="table-td text-center text-slate-500">Memuat…</td></tr>
-              ) : items.length === 0 ? (
-                <tr><td colSpan={4} className="table-td text-center text-slate-500">Belum ada riwayat</td></tr>
-              ) : items.map((l) => (
-                <tr key={l.id}>
-                  <td className="table-td text-xs text-slate-500 whitespace-nowrap">
-                    {new Date(l.createdAt).toLocaleString('id-ID')}
-                  </td>
-                  <td className="table-td">
-                    <div className="text-sm">{l.user?.name || '-'}</div>
-                    <div className="text-xs text-slate-500">{l.user?.email}</div>
-                  </td>
-                  <td className="table-td">
-                    <span className={`badge ${actionColor(l.action)}`}>{actionLabel(l.action)}</span>
-                  </td>
-                  <td className="table-td text-xs text-slate-600">
-                    <pre className="whitespace-pre-wrap break-words">
-                      {JSON.stringify(l.meta, null, 2)}
-                    </pre>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </motion.div>
   );
 }

@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import {
   IsBoolean,
+  IsDateString,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -27,6 +28,10 @@ class CreatePengumumanDto {
   @IsString() @IsNotEmpty() foto!: string;
   @IsOptional() @IsBoolean() aktif?: boolean;
   @IsOptional() @IsInt() @Min(0) urutan?: number;
+  // Jadwal tayang. Format: "YYYY-MM-DD" dari <input type="date">.
+  // null/empty = tidak dibatasi di sisi itu.
+  @IsOptional() @IsDateString() tanggalMulai?: string;
+  @IsOptional() @IsDateString() tanggalSelesai?: string;
 }
 
 class UpdatePengumumanDto {
@@ -34,6 +39,8 @@ class UpdatePengumumanDto {
   @IsOptional() @IsString() @IsNotEmpty() foto?: string;
   @IsOptional() @IsBoolean() aktif?: boolean;
   @IsOptional() @IsInt() @Min(0) urutan?: number;
+  @IsOptional() @IsDateString() tanggalMulai?: string;
+  @IsOptional() @IsDateString() tanggalSelesai?: string;
 }
 
 @Controller('pengumuman')

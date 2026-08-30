@@ -5,7 +5,7 @@
  * controller berikan metadata lewat `Reflector` dengan key `AUDIT_KEY`.
  *
  * Saat ini audit log ditulis secara eksplisit lewat service (lihat
- * PendaftarService, PembayaranService, UsersService, RolesService).
+ * PendaftarService, UsersService, RolesService).
  * File ini tetap ada untuk konsistensi & bisa diaktifkan nanti
  * dengan menambahkan @SetMetadata('audit', {...}) di handler.
  */
@@ -56,9 +56,27 @@ export class AuditLogInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(async () => {
         try {
+          // Snapshot nama/email actor — fetched SEKALI di sini, bukan via
+          // include, supaya batch insert tetap ringan dan aman walau user
+          // dihapus setelahnya (snapshot text tidak terpengaruh relasi).
+          let actorName: string | null = null;
+          let actorEmail: string | null = null;
+          if (user?.sub) {
+            const u = await this.prisma.user.findUnique({
+              where: { id: user.sub },
+              select: { name: true, email: true },
+            });
+            if (u) {
+              actorName = u.name;
+              actorEmail = u.email;
+            }
+          }
+
           await this.prisma.auditLog.create({
             data: {
               userId: user?.sub || null,
+              userName: actorName,
+              userEmail: actorEmail,
               action: options.action,
               module: options.module,
               entityType: options.entityType || null,

@@ -9,6 +9,10 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { AuditLogModule } from '../audit-log/audit-log.module';
+// EmailModule di-import di sini sekalian (meskipun @Global, explicit lebih jelas)
+// untuk dokumentasi dependency auth → email.
+import { EmailModule } from '../email/email.module';
 
 @Module({
   imports: [
@@ -25,6 +29,8 @@ import { PermissionsGuard } from '../common/guards/permissions.guard';
         };
       },
     }),
+    AuditLogModule, // untuk AuthService.requestPasswordReset/resetPassword audit
+    EmailModule,
   ],
   controllers: [AuthController],
   providers: [

@@ -9,7 +9,6 @@ import {
 } from 'recharts';
 import {
   GraduationCap,
-  Wallet,
   UserCheck,
   Users,
   ArrowRight,
@@ -21,18 +20,14 @@ import { useAuth } from '../context/AuthContext';
 import { STATUS_LABELS } from '../lib/constants';
 
 /**
- * Categorical palette untuk 5 status (validated OKLab ×100, CVD ≥ 8, normal ≥ 15).
- * Urutan slot dipakai fix per referensi dataviz — bukan di-cycle per chart.
- * Slot 1 biru (LOLOS_MENUNGGU_DAFTAR_ULANG), 2 oranye (DITOLAK),
- * 3 aqua (SISWA_AKTIF), 4 kuning (MENUNGGU_VERIFIKASI), 5 magenta
- * (MENUNGGU_VERIFIKASI_PEMBAYARAN).
+ * Categorical palette untuk 3 status SPMB (alur disederhanakan).
+ * Urutan slot fix — MENUNGGU_PERSETUJUAN, DITOLAK, SISWA_AKTIF.
+ * Amber untuk "perlu tindakan", oranye-red untuk DITOLAK, hijau emerald untuk sukses.
  */
 const STATUS_PALETTE: Record<string, string> = {
-  LOLOS_MENUNGGU_DAFTAR_ULANG: '#2a78d6',
-  DITOLAK: '#eb6834',
-  SISWA_AKTIF: '#1baf7a',
-  MENUNGGU_VERIFIKASI: '#eda100',
-  MENUNGGU_VERIFIKASI_PEMBAYARAN: '#e87ba4',
+  MENUNGGU_PERSETUJUAN: '#eda100', // amber
+  DITOLAK: '#eb6834',             // oranye-red
+  SISWA_AKTIF: '#1baf7a',         // hijau emerald
 };
 
 export default function DashboardPage() {
@@ -57,17 +52,11 @@ export default function DashboardPage() {
     summary?.byStatus?.find((s: any) => s.status === status)?.count ?? 0;
 
   const totalPendaftar = summary?.total ?? 0;
-  const menungguVerifikasiCount = getCount('MENUNGGU_VERIFIKASI');
+  const menungguPersetujuanCount = getCount('MENUNGGU_PERSETUJUAN');
 
   // Data untuk donut chart — pastikan setiap status punya nilai (default 0)
   const chartData = useMemo(() => {
-    const all = [
-      'MENUNGGU_VERIFIKASI',
-      'DITOLAK',
-      'LOLOS_MENUNGGU_DAFTAR_ULANG',
-      'MENUNGGU_VERIFIKASI_PEMBAYARAN',
-      'SISWA_AKTIF',
-    ];
+    const all = ['MENUNGGU_PERSETUJUAN', 'DITOLAK', 'SISWA_AKTIF'];
     return all.map((status) => ({
       status,
       label: STATUS_LABELS[status],
@@ -87,8 +76,8 @@ export default function DashboardPage() {
 
       {hasAnyRole('Admin', 'Superadmin') && (
         <>
-          {/* Baris 1: 4 stat cards */}
-          <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+          {/* Baris 1: 3 stat cards (alur disederhanakan) */}
+          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
             <StatCard
               label="Total Pendaftar"
               value={totalPendaftar}
@@ -104,23 +93,16 @@ export default function DashboardPage() {
               loading={loading}
             />
             <StatCard
-              label="Lolos - Daftar Ulang"
-              value={getCount('LOLOS_MENUNGGU_DAFTAR_ULANG')}
-              icon={Wallet}
-              color="bg-blue-100 text-blue-700"
-              loading={loading}
-            />
-            <StatCard
               // Card ini clickable — klik langsung ke halaman Pendaftar
-              // dengan filter otomatis status=MENUNGGU_VERIFIKASI
-              label="Menunggu Verifikasi"
-              value={menungguVerifikasiCount}
+              // dengan filter otomatis status=MENUNGGU_PERSETUJUAN
+              label="Menunggu Persetujuan"
+              value={menungguPersetujuanCount}
               icon={Users}
               color="bg-amber-100 text-amber-700"
               loading={loading}
               clickable
-              highlight={menungguVerifikasiCount > 0}
-              onClick={() => navigate('/pendaftar?status=MENUNGGU_VERIFIKASI')}
+              highlight={menungguPersetujuanCount > 0}
+              onClick={() => navigate('/pendaftar?status=MENUNGGU_PERSETUJUAN')}
             />
           </div>
 

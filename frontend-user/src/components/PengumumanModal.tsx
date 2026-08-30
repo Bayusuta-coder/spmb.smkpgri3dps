@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, X, Megaphone, ImageOff } from 'lucide-react';
 import { api, fotoUrl } from '../lib/api';
@@ -10,13 +10,26 @@ interface PengumumanItem {
 }
 
 const SESSION_KEY = 'spmb_pengumuman_dismissed_v1';
+const AUTO_SLIDE_MS = 3000; // 3 detik per slide (konsisten, tanpa jeda)
 
 /**
- * Popup pengumuman — Instagram-style carousel.
- * - Aspect-square (1:1) untuk gambar
- * - Backdrop blur
- * - Smooth scale+fade animation
+ * Popup pengumuman — Instagram-style carousel dengan auto-slide MURNI.
+ *
+ * Behavior:
+ * - Auto-advance tiap AUTO_SLIDE_MS (3 detik) — looping tanpa henti
+ * - TIDAK ada pause-on-hover, TIDAK ada pause-after-manual-interaction
+ * - Klik arrow/dot cuma pindah slide, lalu auto-slide lanjut dari situ
  * - Dismiss = sekali per sesi (sessionStorage)
+ * - Backdrop blur + spring scale-in
+ * - Lock body scroll saat modal terbuka
+ *
+ * Implementation note:
+ * - Timer pakai setInterval di useEffect dengan deps [open, items.length]
+ *   (item count berubah = reset, tapi per-slide transition TIDAK restart
+ *   timer; user interaction cuma setIndex, bukan trigger re-render effect)
+ * - Untuk menjamin timer konsisten, kita pakai ref untuk index setter
+ *   sehingga callback setInterval tidak bergantung pada state index saat
+ *   effect pertama kali jalan.
  */
 export default function PengumumanModal() {
   const [items, setItems] = useState<PengumumanItem[]>([]);
@@ -25,6 +38,7 @@ export default function PengumumanModal() {
   const [index, setIndex] = useState(0);
   const [imgBroken, setImgBroken] = useState<Record<string, boolean>>({});
 
+  // Fetch
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (sessionStorage.getItem(SESSION_KEY) === '1') {
@@ -53,6 +67,7 @@ export default function PengumumanModal() {
     } catch {}
   }, []);
 
+  /** Manual nav: set index, lalu auto-slide lanjut dari situ. */
   const next = useCallback(() => {
     setIndex((i) => (i + 1) % Math.max(items.length, 1));
   }, [items.length]);
@@ -61,7 +76,24 @@ export default function PengumumanModal() {
     setIndex((i) => (i - 1 + Math.max(items.length, 1)) % Math.max(items.length, 1));
   }, [items.length]);
 
-  // Keyboard nav
+  const goTo = useCallback((i: number) => {
+    setIndex(i);
+  }, []);
+
+  // Auto-slide MURNI — jalan terus kecuali modal tertutup / belum ada item
+  // PASTI konsisten 3 detik, tidak dipengaruhi hover/klik apa pun.
+  useEffect(() => {
+    if (!open) return;
+    if (items.length <= 1) return; // Single item: no need to advance
+
+    const id = setInterval(() => {
+      setIndex((i) => (i + 1) % items.length);
+    }, AUTO_SLIDE_MS);
+
+    return () => clearInterval(id);
+  }, [open, items.length]);
+
+  // Keyboard nav (tidak jeda auto-slide)
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -80,7 +112,9 @@ export default function PengumumanModal() {
     if (open) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
-      return () => { document.body.style.overflow = prev; };
+      return () => {
+        document.body.style.overflow = prev;
+      };
     }
   }, [open]);
 
@@ -127,7 +161,7 @@ export default function PengumumanModal() {
                   initial={{ opacity: 0, x: 24 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -24 }}
-                  transition={{ duration: 0.22 }}
+                  transition={{ duration: 0.35, ease: 'easeInOut' }}
                   className="absolute inset-0"
                 >
                   {showBroken ? (
@@ -160,7 +194,7 @@ export default function PengumumanModal() {
                 </motion.div>
               </AnimatePresence>
 
-              {/* Prev / Next (floating) */}
+              {/* Prev / Next (floating) — manual nav, auto-slide lanjut */}
               {items.length > 1 && (
                 <>
                   <button
@@ -187,7 +221,7 @@ export default function PengumumanModal() {
                 {items.map((p, i) => (
                   <button
                     key={p.id}
-                    onClick={() => setIndex(i)}
+                    onClick={() => goTo(i)}
                     aria-label={`Slide ${i + 1}`}
                     className={`h-1.5 rounded-full transition-all ${
                       i === index ? 'w-6 bg-primary-500' : 'w-1.5 bg-slate-300 hover:bg-slate-400'

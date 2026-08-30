@@ -3,10 +3,11 @@ import { useAuth } from './context/AuthContext';
 import { AnimatePresence } from 'framer-motion';
 import AppLayout from './components/AppLayout';
 import LoginPage from './pages/LoginPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import DashboardPage from './pages/DashboardPage';
 import PendaftarListPage from './pages/PendaftarListPage';
 import PendaftarDetailPage from './pages/PendaftarDetailPage';
-import PembayaranListPage from './pages/PembayaranListPage';
 import GelombangPage from './pages/GelombangPage';
 import JurusanPage from './pages/JurusanPage';
 import UsersPage from './pages/UsersPage';
@@ -15,6 +16,10 @@ import StatistikPage from './pages/StatistikPage';
 import AuditLogPage from './pages/AuditLogPage';
 import BeritaPage from './pages/BeritaPage';
 import PengumumanPage from './pages/PengumumanPage';
+import RekapPendapatanPage from './pages/RekapPendapatanPage';
+import ProfilePage from './pages/ProfilePage';
+import PengaturanLaporanPage from './pages/PengaturanLaporanPage';
+import TahunAjaranPage from './pages/TahunAjaranPage';
 
 function PrivateRoute() {
   const { user, loading } = useAuth();
@@ -34,12 +39,15 @@ function PrivateRoute() {
 export default function App() {
   return (
     <Routes>
+      {/* Public auth routes — di luar PrivateRoute agar tidak perlu JWT */}
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+
       <Route element={<PrivateRoute />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/pendaftar" element={<PendaftarListPage />} />
         <Route path="/pendaftar/:id" element={<PendaftarDetailPage />} />
-        <Route path="/pembayaran" element={<PembayaranListPage />} />
         <Route path="/gelombang" element={<GelombangPage />} />
         <Route path="/jurusan" element={<JurusanPage />} />
         <Route path="/users" element={<UsersPage />} />
@@ -48,6 +56,10 @@ export default function App() {
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/berita" element={<BeritaPage />} />
         <Route path="/pengumuman" element={<PengumumanPage />} />
+        <Route path="/rekap-pendapatan" element={<RekapPendapatanPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/pengaturan-laporan" element={<PengaturanLaporanPage />} />
+        <Route path="/tahun-ajaran" element={<TahunAjaranPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

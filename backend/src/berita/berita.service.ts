@@ -50,6 +50,21 @@ export class BeritaService {
   ) {}
 
   /**
+   * Fetch snapshot nama & email user — disimpan ke kolom `*Nama`/`*Email`
+   * di row Berita/Pengumuman. Gunanya supaya kalau user di-hard-delete
+   * nanti, FK akan di-set NULL tapi text snapshot tetap readable.
+   */
+  private async snapshotUser(
+    userId: string,
+  ): Promise<{ name: string | null; email: string | null }> {
+    const u = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true, email: true },
+    });
+    return { name: u?.name ?? null, email: u?.email ?? null };
+  }
+
+  /**
    * List untuk admin — paginated, filter status/search.
    * Termasuk soft-deleted (deletedAt != null) supaya bisa di-restore.
    */
@@ -178,6 +193,9 @@ export class BeritaService {
     const status = opts.status ?? 'DRAFT';
     const publishedAt = status === 'PUBLISHED' ? new Date() : null;
 
+    // Snapshot nama/email author — readable walau user dihapus.
+    const authorSnap = await this.snapshotUser(actorUserId);
+
     const created = await this.prisma.berita.create({
       data: {
         judul: opts.judul.trim(),
@@ -188,6 +206,8 @@ export class BeritaService {
         status,
         publishedAt,
         createdByUserId: actorUserId,
+        createdByNama: authorSnap.name,
+        createdByEmail: authorSnap.email,
       },
     });
 

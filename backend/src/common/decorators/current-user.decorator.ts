@@ -5,6 +5,12 @@ export interface JwtUserPayload {
   email: string;
   name: string;
   permissions: string[];
+  /**
+   * Nama-nama role user (mis. ['Superadmin']).
+   * Digunakan untuk role-based check di endpoint tertentu
+   * (mis. create user — hanya Superadmin).
+   */
+  roles?: string[];
 }
 
 export const CurrentUser = createParamDecorator(

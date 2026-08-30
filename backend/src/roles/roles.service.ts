@@ -4,11 +4,32 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { JwtUserPayload } from '../common/decorators/current-user.decorator';
+
+/**
+ * IP + UA helper — mirror dari auth.controller.ts supaya audit log
+ * permission change tercatat dengan konteks request yang sama.
+ */
+function reqMeta(req?: Request) {
+  if (!req) return { ipAddress: undefined, userAgent: undefined };
+  const ip =
+    (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ||
+    req.ip ||
+    req.socket?.remoteAddress ||
+    undefined;
+  const ua = (req.headers['user-agent'] as string | undefined) || undefined;
+  return { ipAddress: ip, userAgent: ua };
+}
 
 @Injectable()
 export class RolesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditLogService,
+  ) {}
 
   async findAll() {
     const roles = await this.prisma.role.findMany({
@@ -46,7 +67,11 @@ export class RolesService {
     return r;
   }
 
-  async create(opts: { name: string; description?: string; permissionIds: string[] }) {
+  async create(
+    opts: { name: string; description?: string; permissionIds: string[] },
+    actor: JwtUserPayload,
+    req?: Request,
+  ) {
     const exists = await this.prisma.role.findUnique({ where: { name: opts.name } });
     if (exists) throw new ConflictException('Nama role sudah digunakan');
 
@@ -60,17 +85,46 @@ export class RolesService {
       },
       include: { permissions: { include: { permission: true } } },
     });
+
+    // Audit log — role baru dibuat. Permission yang terpasang ikut dicatat
+    // supaya forensik jelas tanpa harus join ke tabel lain.
+    await this.audit.create({
+      userId: actor.sub,
+      action: 'role.created',
+      module: 'role',
+      entityType: 'Role',
+      entityId: role.id,
+      ...reqMeta(req),
+      meta: {
+        name: role.name,
+        description: role.description,
+        permissionIds: opts.permissionIds,
+      },
+    });
+
     return role;
   }
 
-  async update(id: string, opts: { name?: string; description?: string; permissionIds?: string[] }) {
-    const existing = await this.prisma.role.findUnique({ where: { id } });
+  async update(
+    id: string,
+    opts: { name?: string; description?: string; permissionIds?: string[] },
+    actor: JwtUserPayload,
+    req?: Request,
+  ) {
+    const existing = await this.prisma.role.findUnique({
+      where: { id },
+      include: { permissions: { include: { permission: true } } },
+    });
     if (!existing) throw new NotFoundException('Role tidak ditemukan');
     if (existing.isSystem && opts.name && opts.name !== existing.name) {
       throw new BadRequestException('Role sistem tidak boleh diubah namanya');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    // Snapshot BEFORE permission set (untuk audit diff)
+    const beforePermIds = existing.permissions.map((p) => p.permissionId);
+    const beforePermCodes = existing.permissions.map((p) => p.permission.code).sort();
+
+    const result = await this.prisma.$transaction(async (tx) => {
       await tx.role.update({
         where: { id },
         data: {
@@ -91,21 +145,77 @@ export class RolesService {
         include: { permissions: { include: { permission: true } } },
       });
     });
+
+    // Audit diff — kalau ada perubahan permission, catat kode permission
+    // yang ditambah/dihapus supaya admin bisa lihat history tanpa query DB.
+    if (opts.permissionIds) {
+      const afterPermIds = (result?.permissions || []).map((p) => p.permissionId);
+      const afterPermCodes = (result?.permissions || [])
+        .map((p) => p.permission.code)
+        .sort();
+
+      const beforeSet = new Set(beforePermCodes);
+      const afterSet = new Set(afterPermCodes);
+      const added = afterPermCodes.filter((c) => !beforeSet.has(c));
+      const removed = beforePermCodes.filter((c) => !afterSet.has(c));
+
+      // Hanya log kalau ada perubahan (skip no-op save)
+      if (added.length > 0 || removed.length > 0) {
+        await this.audit.create({
+          userId: actor.sub,
+          action: 'role.permissions_updated',
+          module: 'role',
+          entityType: 'Role',
+          entityId: id,
+          ...reqMeta(req),
+          meta: {
+            roleName: result?.name,
+            before: { permissionIds: beforePermIds, permissionCodes: beforePermCodes },
+            after: { permissionIds: afterPermIds, permissionCodes: afterPermCodes },
+            addedPermissionCodes: added,
+            removedPermissionCodes: removed,
+          },
+        });
+      }
+    }
+
+    return result;
   }
 
-  async remove(id: string) {
+  async remove(id: string, actor: JwtUserPayload, req?: Request) {
     const existing = await this.prisma.role.findUnique({
       where: { id },
-      include: { _count: { select: { users: true } } },
+      include: {
+        _count: { select: { users: true } },
+        permissions: { include: { permission: true } },
+      },
     });
     if (!existing) throw new NotFoundException('Role tidak ditemukan');
-    if (existing.isSystem) throw new BadRequestException('Role sistem tidak boleh dihapus');
+    if (existing.isSystem) {
+      throw new BadRequestException('Role sistem tidak boleh dihapus');
+    }
     if (existing._count.users > 0) {
       throw new BadRequestException(
-        `Role masih dipakai oleh ${existing._count.users} user. Pindahkan dulu user ke role lain.`,
+        `Role masih dipakai oleh ${existing._count.users} user. Pindahkan user terlebih dahulu.`,
       );
     }
-    await this.prisma.role.delete({ where: { id } });
-    return { ok: true };
+
+    // Audit log snapshot — supaya forensik tahu permission apa saja yang
+    // ikut hilang saat role dihapus.
+    await this.audit.create({
+      userId: actor.sub,
+      action: 'role.deleted',
+      module: 'role',
+      entityType: 'Role',
+      entityId: id,
+      ...reqMeta(req),
+      meta: {
+        name: existing.name,
+        description: existing.description,
+        permissionCodes: existing.permissions.map((p) => p.permission.code),
+      },
+    });
+
+    return this.prisma.role.delete({ where: { id } });
   }
 }

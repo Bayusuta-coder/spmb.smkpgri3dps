@@ -24,17 +24,37 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  roles                    UserRole[]
-  pendaftar                Pendaftar[]   @relation("PendaftarUser")
-  auditLogs                AuditLog[]
-  verifiedPendaftar        Pendaftar[]   @relation("PendaftarVerifiedBy")
-  approvedPendaftar        Pendaftar[]   @relation("PendaftarApprovedBy")
-  verifiedPembayaran       Pembayaran[]  @relation("PembayaranVerifiedBy")
-  confirmedDaftarUlang     Pendaftar[]   @relation("PendaftarConfirmedBy")
-  deletedJurusan           Jurusan[]     @relation("JurusanDeletedBy")
-  beritaDibuat             Berita[]      @relation("BeritaCreatedBy")
-  pengumumanDibuat         Pengumuman[]  @relation("PengumumanCreatedBy")
+  // Password reset (self-service via email link).
+  // `resetTokenHash` adalah SHA-256 dari token raw — token raw hanya hidup
+  // di URL email. Kalau DB bocor, attacker tidak bisa pakai token.
+  // `resetTokenExpires` = TTL, defaultnya PASSWORD_RESET_TOKEN_TTL menit.
+  resetTokenHash    String?
+  resetTokenExpires DateTime?
 
+  // WhatsApp (untuk laporan/notifikasi). Backward-compatible: nullable,
+  // user lama tanpa nomor tetap bisa login. Kalau `whatsappNumber` di-update
+  // ke nilai baru, `whatsappVerifiedAt` di-reset ke null — harus verifikasi
+  // ulang. `whatsappNumber` disimpan SELALU dalam format E.164 (`62xxxxxxxxxx`).
+  // Validasi dilakukan di WhatsappService.normalizePhoneNumber().
+  whatsappNumber     String?
+  whatsappVerifiedAt DateTime?
+
+  roles                UserRole[]
+  pendaftar            Pendaftar[]   @relation("PendaftarUser")
+  auditLogs            AuditLog[]
+  whatsappOtps         WhatsAppOtp[]
+  verifiedPendaftar    Pendaftar[]   @relation("PendaftarVerifiedBy")
+  approvedPendaftar    Pendaftar[]   @relation("PendaftarApprovedBy")
+  confirmedDaftarUlang Pendaftar[]   @relation("PendaftarConfirmedBy")
+  pembayaranDiterima   Pendaftar[]   @relation("PendaftarPaymentRecordedBy")
+  ukuranBajuDiinput    Pendaftar[]   @relation("PendaftarUkuranBajuSetBy")
+  deletedJurusan       Jurusan[]     @relation("JurusanDeletedBy")
+  beritaDibuat         Berita[]      @relation("BeritaCreatedBy")
+  pengumumanDibuat     Pengumuman[]  @relation("PengumumanCreatedBy")
+  settingsUpdated      Setting[]     @relation("SettingUpdatedBy")
+
+  @@index([resetTokenHash])
+  @@index([whatsappNumber])
   @@map("users")
 }
 
@@ -96,6 +116,11 @@ model RolePermission {
 model AuditLog {
   id         String   @id @default(cuid())
   userId     String?
+  // Snapshot nama & email actor — disimpan supaya log tetap readable
+  // walau user aslinya sudah dihapus (relasi userId di-set null tapi data
+  // tidak hilang).
+  userName   String?
+  userEmail  String?
   action     String
   module     String
   entityType String?
@@ -118,36 +143,40 @@ model AuditLog {
 // ============================================================================
 
 model Jurusan {
-  id        String    @id @default(cuid())
-  code      String    @unique
-  name      String
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  code            String    @unique
+  name            String
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   // soft delete: Jurusan yang pernah dipilih pendaftar tidak boleh hilang
-  deletedAt DateTime?
+  deletedAt       DateTime?
   deletedByUserId String?
+  // Snapshot nama & email user yang menghapus — agar history tetap readable
+  // walau user dihapus.
+  deletedByNama   String?
+  deletedByEmail  String?
 
-  kuota          KuotaGelombang[]
-  pendaftar      Pendaftar[]
-  deletedByUser  User?            @relation("JurusanDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  kuota         KuotaGelombang[]
+  pendaftar     Pendaftar[]
+  deletedByUser User?            @relation("JurusanDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
 
   @@index([deletedAt])
   @@map("jurusan")
 }
 
 model Gelombang {
-  id        String    @id @default(cuid())
-  name      String
-  startDate DateTime
-  endDate   DateTime?
-  isActive  Boolean   @default(false)
+  id                 String    @id @default(cuid())
+  name               String
+  startDate          DateTime
+  endDate            DateTime?
+  isActive           Boolean   @default(false)
   // Jadwal pelaksanaan daftar ulang FISIK di sekolah (untuk QR/info publik).
   // Opsional — bisa diisi belakangan oleh superadmin.
   tanggalDaftarUlang DateTime?
   jamDaftarUlang     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   kuota     KuotaGelombang[]
   pendaftar Pendaftar[]
@@ -175,16 +204,40 @@ model KuotaGelombang {
 // ============================================================================
 
 enum StatusPendaftar {
-  MENUNGGU_VERIFIKASI // berkas baru masuk, menunggu admin verifikasi
-  DITOLAK // ditolak admin
-  LOLOS_MENUNGGU_DAFTAR_ULANG // lolos verifikasi berkas, harus input pembayaran
-  MENUNGGU_VERIFIKASI_PEMBAYARAN // siswa sudah submit pembayaran, menunggu TU cek
-  SISWA_AKTIF // pembayaran diverifikasi TU + admin approve final
+  MENUNGGU_PERSETUJUAN // siswa submit form, dua-duanya (baju + bayar) belum terisi
+  // (label publik: "Menunggu Daftar Ulang")
+  MENUNGGU_PEMBAYARAN // ukuran baju sudah diinput TU, pembayaran belum
+  // (label publik: "Menunggu Pembayaran")
+  MENUNGGU_UKURAN_BAJU // pembayaran sudah dicatat Bendahara, ukuran baju belum
+  // (label publik: "Menunggu Ukuran Baju")
+  DITOLAK // ditolak admin (rejectionNote WAJIB terisi) — terminal
+  SISWA_AKTIF // dua-duanya sudah terisi, PDF Tahap 2 + email dikirim otomatis
+}
+
+// Track status pembayaran secara terpisah dari status enum, supaya bisa
+// auto-compute StatusPendaftar dari kombinasi (statusPembayaran, ukuranBaju).
+enum StatusPembayaran {
+  BELUM // siswa belum bayar (default saat register)
+  LUNAS // Bendahara sudah catat pembayaran lunas
+}
+
+enum MetodePembayaran {
+  CASH
+  TRANSFER
 }
 
 enum JenisKelamin {
   L
   P
+}
+
+enum Agama {
+  ISLAM
+  KRISTEN
+  KATOLIK
+  HINDU
+  BUDDHA
+  KHONGHUCU
 }
 
 model Pendaftar {
@@ -194,34 +247,78 @@ model Pendaftar {
   jenisKelamin       JenisKelamin
   tempatLahir        String
   tanggalLahir       DateTime
-  nisn               String
+  // NISN OPSIONAL — banyak calon pendaftar (terutama homeschooling / pindahan
+  // dari luar daerah) belum punya NISN saat mendaftar. Kalau diisi, harus
+  // 10 digit dan unik per gelombang (dicek di service). Disimpan sebagai
+  // null di DB kalau kosong supaya konsisten dengan validasi DTO.
+  nisn               String?
   sekolahAsal        String
   alamat             String
   noTelp             String
   email              String? // untuk notifikasi email otomatis ke siswa
-  jumlahNilaiUn      Decimal         @db.Decimal(6, 2)
+  // Nilai UN OPSIONAL — banyak pendaftar (terutama pindahan / homeschooling /
+  // yang berasal dari sekolah non-formal) belum punya nilai UN resmi saat
+  // mendaftar. Sama seperti NISN, boleh kosong; kalau diisi tetap divalidasi
+  // formatnya (0–100) di service dan DTO.
+  jumlahNilaiUn      Decimal?        @db.Decimal(6, 2)
   prestasi           String?
   namaIbu            String
   noTelpOrtu         String
+  agama              Agama? // opsional untuk backward-compat data lama; wajib diisi pendaftar baru
   jurusanId          String
   gelombangId        String
-  status             StatusPendaftar @default(MENUNGGU_VERIFIKASI)
+  status             StatusPendaftar @default(MENUNGGU_PERSETUJUAN)
 
   // audit fields
-  verifiedById  String?
-  verifiedAt    DateTime?
-  rejectionNote String?
-  approvedById  String?
-  approvedAt    DateTime?
+  verifiedById    String?
+  verifiedAt      DateTime?
+  rejectionNote   String?
+  approvedById    String?
+  approvedAt      DateTime?
+  // Snapshot nama & email actor di tiap transisi — readable walau user dihapus.
+  verifiedByNama  String?
+  verifiedByEmail String?
+  approvedByNama  String?
+  approvedByEmail String?
 
-  // PDF & QR — dihasilkan saat approve final
+  // Data daftar ulang fisik.
+  //
+  // ALUR BARU (desentralisasi): dua-duanya (baju + bayar) diinput oleh role
+  // BERBEDA pada waktu BEBAS — tidak lagi bundled dalam satu approval. Status
+  // di-compute on-the-fly dari kombinasi (statusPembayaran, ukuranBaju):
+  //
+  //   statusPembayaran= BELUM, ukuranBaju=null     → MENUNGGU_PERSETUJUAN
+  //   statusPembayaran= BELUM, ukuranBaju="M"      → MENUNGGU_PEMBAYARAN
+  //   statusPembayaran= LUNAS,  ukuranBaju=null    → MENUNGGU_UKURAN_BAJU
+  //   statusPembayaran= LUNAS,  ukuranBaju="M"     → SISWA_AKTIF (PDF + email auto)
+  //
+  // ukuranBaju: pilihan (XS/S/M/L/XL/XXL/XXXL) yang diinput TU.
+  // nominalPembayaran: SNAPSHOT harga_daftar_ulang Setting saat Bendahara catat —
+  // disimpan supaya PDF historical konsisten walau harga global berubah di kemudian hari.
+  statusPembayaran          StatusPembayaran  @default(BELUM)
+  metodePembayaran          MetodePembayaran?
+  tanggalBayar              DateTime?
+  dibayarOlehUserId         String?
+  dibayarOlehNama           String?
+  dibayarOlehEmail          String?
+  ukuranBaju                String?
+  tanggalUkuranBaju         DateTime?
+  ukuranBajuDisetOlehUserId String?
+  ukuranBajuDisetOlehNama   String?
+  ukuranBajuDisetOlehEmail  String?
+  nominalPembayaran         Decimal?          @db.Decimal(12, 2)
+
+  // PDF & QR — dihasilkan saat register (Tahap 1: Menunggu Daftar Ulang)
+  // lalu di-regenerate saat status auto-flip ke SISWA_AKTIF (Tahap 2).
   pdfPath        String?
   pdfGeneratedAt DateTime?
-  pdfSignature   String? @unique // token random di-encode ke QR (lookup pendaftar)
+  pdfSignature   String?   @unique // token random di-encode ke QR (lookup pendaftar)
 
   // Konfirmasi kehadiran daftar ulang fisik (di-scan dari QR oleh TU/admin)
-  daftarUlangConfirmedAt      DateTime?
+  daftarUlangConfirmedAt       DateTime?
   daftarUlangConfirmedByUserId String?
+  daftarUlangConfirmedByNama   String?
+  daftarUlangConfirmedByEmail  String?
 
   // opsional: jika suatu saat dibuat akun siswa otomatis
   userId String? @unique
@@ -229,13 +326,14 @@ model Pendaftar {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  jurusan              Jurusan   @relation(fields: [jurusanId], references: [id])
-  gelombang            Gelombang @relation(fields: [gelombangId], references: [id])
-  verifiedBy           User?     @relation("PendaftarVerifiedBy", fields: [verifiedById], references: [id])
-  approvedBy           User?     @relation("PendaftarApprovedBy", fields: [approvedById], references: [id])
-  daftarUlangConfirmedBy User?   @relation("PendaftarConfirmedBy", fields: [daftarUlangConfirmedByUserId], references: [id])
-  user                 User?     @relation("PendaftarUser", fields: [userId], references: [id])
-  pembayaran           Pembayaran?
+  jurusan                Jurusan   @relation(fields: [jurusanId], references: [id])
+  gelombang              Gelombang @relation(fields: [gelombangId], references: [id])
+  verifiedBy             User?     @relation("PendaftarVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  approvedBy             User?     @relation("PendaftarApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  daftarUlangConfirmedBy User?     @relation("PendaftarConfirmedBy", fields: [daftarUlangConfirmedByUserId], references: [id], onDelete: SetNull)
+  dibayarOleh            User?     @relation("PendaftarPaymentRecordedBy", fields: [dibayarOlehUserId], references: [id], onDelete: SetNull)
+  ukuranBajuDisetOleh    User?     @relation("PendaftarUkuranBajuSetBy", fields: [ukuranBajuDisetOlehUserId], references: [id], onDelete: SetNull)
+  user                   User?     @relation("PendaftarUser", fields: [userId], references: [id])
 
   @@index([status])
   @@index([jurusanId])
@@ -247,36 +345,24 @@ model Pendaftar {
 }
 
 // ============================================================================
-// SPMB - PEMBAYARAN (manual transfer, tanpa payment gateway)
+// SETTINGS / KONFIGURASI GLOBAL (mis. harga daftar ulang, opsi ukuran baju)
+// Diedit superadmin via UI menu Bendahara nanti; PDF snapshot nilainya saat approve.
 // ============================================================================
 
-enum StatusPembayaran {
-  MENUNGGU_VERIFIKASI
-  TERVERIFIKASI
-  BELUM_DITEMUKAN
-}
+model Setting {
+  key             String   @id // mis. "harga_daftar_ulang", "ukuran_baju_options"
+  value           String // disimpan sebagai string (Decimal/JSON/CSV) — casting di service layer
+  description     String?
+  updatedByUserId String?
+  // Snapshot nama & email user yang terakhir update — readable walau user dihapus.
+  updatedByNama   String?
+  updatedByEmail  String?
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
 
-model Pembayaran {
-  id              String           @id @default(cuid())
-  pendaftarId     String           @unique
-  nominal         Decimal          @db.Decimal(12, 2)
-  tanggalTransfer DateTime
-  namaPengirim    String
-  catatan         String?
-  status          StatusPembayaran @default(MENUNGGU_VERIFIKASI)
+  updatedBy User? @relation("SettingUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
-  verifiedById String?
-  verifiedAt   DateTime?
-  note         String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  pendaftar  Pendaftar @relation(fields: [pendaftarId], references: [id], onDelete: Cascade)
-  verifiedBy User?     @relation("PembayaranVerifiedBy", fields: [verifiedById], references: [id])
-
-  @@index([status])
-  @@map("pembayaran_spmb")
+  @@map("settings")
 }
 
 // ============================================================================
@@ -318,10 +404,13 @@ model Berita {
   status      StatusBerita @default(DRAFT)
   publishedAt DateTime? // di-set saat pertama publish, untuk sort publik yang stabil
 
-  createdByUserId String
-  createdBy       User     @relation("BeritaCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdByUserId String?
+  // Snapshot nama & email author — readable walau user dihapus.
+  createdByNama   String?
+  createdByEmail  String?
+  createdBy       User?     @relation("BeritaCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
   @@index([status, publishedAt])
@@ -336,13 +425,87 @@ model Pengumuman {
   aktif  Boolean @default(true)
   urutan Int     @default(0) // sort di carousel, lower = lebih dulu
 
-  createdByUserId String
-  createdBy       User     @relation("PengumumanCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  // Jadwal tayang (nullable). Logic penentuan "tayang" dihitung on-the-fly
+  // di service.findActive() — tidak ada cron job, tidak ada field status
+  // terpisah. tanggalMulai null = langsung tayang saat disimpan.
+  // tanggalSelesai null = unlimited (toggle aktif yg hentikan).
+  tanggalMulai   DateTime?
+  tanggalSelesai DateTime?
+
+  createdByUserId String?
+  // Snapshot nama & email author — readable walau user dihapus.
+  createdByNama   String?
+  createdByEmail  String?
+  createdBy       User?     @relation("PengumumanCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
   @@index([aktif, urutan])
   @@index([deletedAt])
+  @@index([tanggalMulai, tanggalSelesai])
   @@map("pengumuman")
+}
+
+// ============================================================================
+// WHATSAPP — OTP challenges + konfigurasi laporan harian
+// ============================================================================
+//
+// OTP disimpan sebagai SHA-256 HASH (bukan plaintext). Raw OTP hanya hidup di
+// response API request-otp (untuk ditampilkan di response kalau pakai mode
+// dev) atau di message WhatsApp yang dikirim ke user. Kalau DB bocor,
+// attacker tidak bisa pakai OTP.
+//
+// Lifecycle:
+//   1. User request OTP → insert new row (challengeId=A), hash(sha256(rawOtp))
+//   2. Old row (challengeId=A) untuk user yang sama di-soft-cancel (diganti
+//      status='cancelled') sehingga attempt lama tidak valid lagi.
+//   3. Verify: cek hash cocok, expires > now, status='pending', attempts < 5.
+//   4. Berhasil → status='verified', set User.whatsappVerifiedAt.
+//   5. Gagal → attempts++, kalau attempts >= 5 → status='cancelled'.
+//
+// Kalau nomor WhatsApp user di-UPDATE, semua OTP lama di-cancel.
+
+model WhatsAppOtp {
+  id          String    @id @default(cuid())
+  userId      String
+  phoneNumber String // E.164 format (`62xxxxxxxxxx`) — diset saat request
+  codeHash    String // SHA-256 dari 6-digit code (plaintext tidak pernah disimpan)
+  status      String    @default("pending") // pending | verified | cancelled | expired
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  expiresAt   DateTime
+  verifiedAt  DateTime?
+  cancelledAt DateTime?
+  ipAddress   String?
+  userAgent   String?
+  meta        Json? // debug info (provider response id, dsb.) — JANGAN simpan raw OTP
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([phoneNumber])
+  @@index([status, expiresAt])
+  @@map("whatsapp_otps")
+}
+
+// ============================================================================
+// WHATSAPP SETTINGS — konfigurasi laporan harian (bukan credential)
+// ============================================================================
+//
+// Credential (API URL, token, phone ID) TIDAK disimpan di DB — hanya di
+// environment variable backend. Yang disimpan di sini: setting operasional
+// yang BOLEH diedit superadmin lewat UI (toggle aktif, jam kirim, daftar
+// recipient user, format pesan).
+
+model WhatsAppSetting {
+  key         String   @id
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@map("whatsapp_settings")
 }

@@ -1,10 +1,25 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Trash2, History, ListChecks, Edit3, RotateCcw, Power, Eye, EyeOff } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  History,
+  ListChecks,
+  Edit3,
+  RotateCcw,
+  Power,
+  Eye,
+  EyeOff,
+  Calendar,
+  Infinity as InfinityIcon,
+  Clock,
+  CheckCircle2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { api, fotoUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import UploadFotoField from '../components/UploadFotoField';
+import HistoryTab from '../components/HistoryTab';
 
 type Tab = 'list' | 'history';
 
@@ -14,6 +29,10 @@ interface Pengumuman {
   foto: string;
   aktif: boolean;
   urutan: number;
+  /** ISO date string YYYY-MM-DD, atau null */
+  tanggalMulai: string | null;
+  /** ISO date string YYYY-MM-DD, atau null = unlimited */
+  tanggalSelesai: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -25,6 +44,12 @@ interface FormState {
   foto: string;
   aktif: boolean;
   urutan: number;
+  /** "YYYY-MM-DD" atau '' (kosong) */
+  tanggalMulai: string;
+  /** "YYYY-MM-DD" atau '' (kosong) */
+  tanggalSelesai: string;
+  /** Kalau true, tanggalSelesai dikosongkan & disabled */
+  unlimited: boolean;
 }
 
 const EMPTY_FORM: FormState = {
@@ -32,6 +57,67 @@ const EMPTY_FORM: FormState = {
   foto: '',
   aktif: true,
   urutan: 0,
+  tanggalMulai: '',
+  tanggalSelesai: '',
+  unlimited: false,
+};
+
+type StatusBadge = 'aktif' | 'terjadwal' | 'berakhir' | 'unlimited' | 'nonaktif';
+
+/** Hitung status on-the-fly di klien (sama dengan computeStatus di BE). */
+function computeStatus(p: {
+  aktif: boolean;
+  tanggalMulai: string | null;
+  tanggalSelesai: string | null;
+}, now: Date = new Date()): StatusBadge {
+  if (!p.aktif) return 'nonaktif';
+  const mulai = p.tanggalMulai ? new Date(`${p.tanggalMulai}T00:00:00.000Z`) : null;
+  const selesai = p.tanggalSelesai
+    ? new Date(`${p.tanggalSelesai}T23:59:59.999Z`)
+    : null;
+  if (mulai && now < mulai) return 'terjadwal';
+  if (selesai && now > selesai) return 'berakhir';
+  if (!selesai) return 'unlimited';
+  return 'aktif';
+}
+
+const STATUS_BADGE: Record<StatusBadge, { label: string; className: string; icon: any }> = {
+  aktif: {
+    label: 'Aktif',
+    className: 'bg-emerald-100 text-emerald-700',
+    icon: CheckCircle2,
+  },
+  terjadwal: {
+    label: 'Terjadwal',
+    className: 'bg-amber-100 text-amber-700',
+    icon: Clock,
+  },
+  berakhir: {
+    label: 'Berakhir',
+    className: 'bg-red-100 text-red-700',
+    icon: Calendar,
+  },
+  unlimited: {
+    label: 'Unlimited',
+    className: 'bg-blue-100 text-blue-700',
+    icon: InfinityIcon,
+  },
+  nonaktif: {
+    label: 'Non-aktif',
+    className: 'bg-slate-100 text-slate-600',
+    icon: EyeOff,
+  },
+};
+
+/** Format ISO date "YYYY-MM-DD" → "14 Agt 2026" (id-ID). */
+const fmtDate = (iso: string | null) => {
+  if (!iso) return '—';
+  return new Date(`${iso}T00:00:00.000Z`).toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
 };
 
 export default function PengumumanPage() {
@@ -75,11 +161,15 @@ export default function PengumumanPage() {
 
   const openEdit = (p: Pengumuman) => {
     setEditingId(p.id);
+    const tanggalSelesaiAda = Boolean(p.tanggalSelesai);
     setForm({
       judul: p.judul,
       foto: p.foto,
       aktif: p.aktif,
       urutan: p.urutan,
+      tanggalMulai: p.tanggalMulai ?? '',
+      tanggalSelesai: p.tanggalSelesai ?? '',
+      unlimited: !tanggalSelesaiAda && p.aktif,
     });
     setShowForm(true);
   };
@@ -90,11 +180,21 @@ export default function PengumumanPage() {
       toast.error('Foto wajib diupload');
       return;
     }
+    // Validasi client-side: tanggalSelesai >= tanggalMulai
+    if (form.tanggalMulai && form.tanggalSelesai && !form.unlimited) {
+      if (form.tanggalSelesai < form.tanggalMulai) {
+        toast.error('Tanggal selesai tidak boleh sebelum tanggal mulai');
+        return;
+      }
+    }
+    // Kirim null kalau kosong (server treat null = unlimited/no-start)
     const payload = {
       judul: form.judul.trim(),
       foto: form.foto,
       aktif: form.aktif,
       urutan: Number(form.urutan) || 0,
+      tanggalMulai: form.tanggalMulai || null,
+      tanggalSelesai: form.unlimited ? null : (form.tanggalSelesai || null),
     };
     try {
       if (editingId) {
@@ -224,6 +324,63 @@ export default function PengumumanPage() {
                   folder="pengumuman"
                 />
 
+                {/* Jadwal tayang */}
+                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Calendar size={14} className="text-slate-500" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                      Jadwal Tayang
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="label">Tanggal Mulai Tayang</label>
+                      <input
+                        type="date"
+                        className="input"
+                        value={form.tanggalMulai}
+                        onChange={(e) => setForm({ ...form, tanggalMulai: e.target.value })}
+                      />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Kosongkan = langsung tayang saat disimpan.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="label">Tanggal Selesai Tayang</label>
+                      <input
+                        type="date"
+                        className="input"
+                        value={form.tanggalSelesai}
+                        onChange={(e) => setForm({ ...form, tanggalSelesai: e.target.value })}
+                        disabled={form.unlimited}
+                        min={form.tanggalMulai || undefined}
+                      />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Kosongkan = tidak ada batas waktu (jika tidak dicentang Unlimited).
+                      </p>
+                    </div>
+                  </div>
+                  <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={form.unlimited}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          unlimited: e.target.checked,
+                          // Kalau unlimited diaktifkan, kosongkan tanggalSelesai
+                          tanggalSelesai: e.target.checked ? '' : prev.tanggalSelesai,
+                        }))
+                      }
+                    />
+                    <InfinityIcon size={14} className="text-blue-600" />
+                    <span>
+                      <b>Unlimited</b> — tayang terus sampai dinonaktifkan manual
+                      lewat toggle Aktif.
+                    </span>
+                  </label>
+                </div>
+
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
@@ -322,14 +479,21 @@ export default function PengumumanPage() {
                             )}
                           </td>
                           <td className="table-td">
-                            {p.aktif ? (
-                              <span className="badge bg-emerald-100 text-emerald-700">
-                                <Eye size={10} /> Aktif
-                              </span>
-                            ) : (
-                              <span className="badge bg-slate-100 text-slate-600">
-                                <EyeOff size={10} /> Non-aktif
-                              </span>
+                            {(() => {
+                              const status = computeStatus(p);
+                              const meta = STATUS_BADGE[status];
+                              const Icon = meta.icon;
+                              return (
+                                <span className={`badge ${meta.className}`}>
+                                  <Icon size={10} /> {meta.label}
+                                </span>
+                              );
+                            })()}
+                            {(p.tanggalMulai || p.tanggalSelesai) && (
+                              <div className="mt-1 text-[11px] text-slate-500">
+                                {fmtDate(p.tanggalMulai)} →{' '}
+                                {p.tanggalSelesai ? fmtDate(p.tanggalSelesai) : '∞'}
+                              </div>
                             )}
                           </td>
                           <td className="table-td font-mono text-sm">{p.urutan}</td>
@@ -385,112 +549,9 @@ export default function PengumumanPage() {
             </div>
           </motion.div>
         ) : (
-          <HistoryTab key="history" title="Riwayat Perubahan Pengumuman" />
+          <HistoryTab key="history" module="pengumuman" title="Riwayat Perubahan Pengumuman" />
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function HistoryTab({ title }: { title: string }) {
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await api.get('/audit-logs', {
-          params: { module: 'pengumuman', pageSize: 100 },
-        });
-        setItems(res.data.items);
-      } catch (e: any) {
-        toast.error(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  const actionLabel = (a: string) => {
-    switch (a) {
-      case 'pengumuman.created':
-        return 'Tambah Pengumuman';
-      case 'pengumuman.updated':
-        return 'Edit Pengumuman';
-      case 'pengumuman.deleted':
-        return 'Hapus Pengumuman';
-      case 'pengumuman.restored':
-        return 'Restore Pengumuman';
-      default:
-        return a;
-    }
-  };
-
-  const actionColor = (a: string) => {
-    if (a.endsWith('.deleted')) return 'bg-red-100 text-red-700';
-    if (a.endsWith('.created')) return 'bg-emerald-100 text-emerald-700';
-    if (a.endsWith('.restored')) return 'bg-blue-100 text-blue-700';
-    return 'bg-slate-100 text-slate-700';
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.18 }}
-    >
-      <p className="mb-3 text-sm text-slate-600">{title}</p>
-      <div className="card overflow-hidden p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="border-b border-slate-200 bg-slate-50">
-              <tr>
-                <th className="table-th">Waktu</th>
-                <th className="table-th">User</th>
-                <th className="table-th">Aksi</th>
-                <th className="table-th">Detail</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={4} className="table-td text-center text-slate-500">
-                    Memuat…
-                  </td>
-                </tr>
-              ) : items.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="table-td text-center text-slate-500">
-                    Belum ada riwayat
-                  </td>
-                </tr>
-              ) : (
-                items.map((l) => (
-                  <tr key={l.id}>
-                    <td className="table-td whitespace-nowrap text-xs text-slate-500">
-                      {new Date(l.createdAt).toLocaleString('id-ID')}
-                    </td>
-                    <td className="table-td">
-                      <div className="text-sm">{l.user?.name || '-'}</div>
-                      <div className="text-xs text-slate-500">{l.user?.email}</div>
-                    </td>
-                    <td className="table-td">
-                      <span className={`badge ${actionColor(l.action)}`}>{actionLabel(l.action)}</span>
-                    </td>
-                    <td className="table-td text-xs text-slate-600">
-                      <pre className="whitespace-pre-wrap break-words">
-                        {JSON.stringify(l.meta, null, 2)}
-                      </pre>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </motion.div>
   );
 }

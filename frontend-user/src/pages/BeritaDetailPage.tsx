@@ -94,18 +94,21 @@ export default function BeritaDetailPage() {
         </button>
 
         <article className="card overflow-hidden p-0">
-          {/* Foto utama — hero 21:9 (landscape lebar) untuk halaman detail */}
+          {/* Foto utama — kontainer fleksibel: batasi tinggi maksimum tapi
+              gunakan object-contain + bg netral supaya foto landscape,
+              portrait, atau square sama-sama terlihat UTUH, tidak di-crop
+              atau di-zoom seperti pakai aspect-ratio fixed + object-cover. */}
           {berita.foto ? (
-            <div className="relative aspect-[21/9] w-full overflow-hidden bg-slate-100">
+            <div className="flex w-full items-center justify-center overflow-hidden bg-slate-100">
               <img
                 src={fotoUrl(berita.foto)}
                 alt={berita.judul}
-                className="h-full w-full object-cover"
+                loading="eager"
+                className="block h-auto max-h-[420px] w-full object-contain md:max-h-[520px]"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
             </div>
           ) : (
-            <div className="flex aspect-[21/9] w-full items-center justify-center bg-slate-100 text-slate-400">
+            <div className="flex h-56 w-full items-center justify-center bg-slate-100 text-slate-400">
               <ImageOff size={32} />
             </div>
           )}

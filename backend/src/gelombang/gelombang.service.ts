@@ -301,23 +301,76 @@ export class GelombangService {
     return updated;
   }
 
+  /**
+   * HARD DELETE gelombang — dengan safety check: TOLAK hapus kalau masih ada
+   * pendaftar yang referensi gelombang ini (foreign key Pendaftar.gelombangId
+   * dengan onDelete default = NoAction akan meledak anyway, tapi kita kasih
+   * pesan yang jelas supaya frontend bisa tampilkan warning yang helpful).
+   *
+   * Alur:
+   *   1. Cari gelombang → 404 kalau tidak ada
+   *   2. Hitung pendaftar yang masih reference gelombang ini (exclude DITOLAK
+   *      tidak dipakai di sini — semua pendaftar dihitung, karena DITOLAK
+   *      pun masih historical data yang harus dilindungi).
+   *   3. Kalau count > 0 → throw BadRequestException dengan detail count + nama
+   *      gelombang + sample 5 nomor pendaftaran yang terdampak.
+   *   4. Kalau count = 0 → hard-delete (KuotaGelombang ikut cascade via schema)
+   *      + audit log action `gelombang.deleted`.
+   *
+   * Endpoint: DELETE /gelombang/:id  (permission: gelombang.manage)
+   * Note: "soft-deactivate" tidak dipakai lagi di sini — kalau admin cuma mau
+   * nonaktifkan sementara, pakai PATCH /gelombang/:id dengan isActive=false.
+   */
   async remove(id: string, actorUserId?: string) {
     const existing = await this.prisma.gelombang.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Gelombang tidak ditemukan');
-    const updated = await this.prisma.gelombang.update({
-      where: { id },
-      data: { isActive: false },
+
+    // Hitung pendaftar yang reference gelombang ini
+    const pendaftarCount = await this.prisma.pendaftar.count({
+      where: { gelombangId: id },
     });
+    if (pendaftarCount > 0) {
+      // Ambil sample nomor pendaftaran supaya user tahu data apa yang akan
+      // ter-orphan kalau dipaksa hapus (untuk warning message).
+      const sample = await this.prisma.pendaftar.findMany({
+        where: { gelombangId: id },
+        select: { registrationNumber: true, namaLengkap: true },
+        orderBy: { createdAt: 'asc' },
+        take: 5,
+      });
+      const sampleText = sample
+        .map((s) => `${s.registrationNumber} (${s.namaLengkap})`)
+        .join(', ');
+      throw new BadRequestException(
+        `Gelombang "${existing.name}" tidak bisa dihapus karena masih ada ` +
+          `${pendaftarCount} pendaftar yang terkait. Hapus / pindahkan pendaftar ` +
+          `terlebih dahulu. Contoh: ${sampleText}${pendaftarCount > 5 ? ', …' : ''}.`,
+      );
+    }
 
-    await this.audit.create({
-      userId: actorUserId ?? null,
-      action: 'gelombang.deactivated',
-      module: 'gelombang',
-      entityType: 'Gelombang',
-      entityId: id,
-      meta: { name: existing.name },
-    }).catch(() => null);
+    // Safe to hard-delete — KuotaGelombang auto-cascade via Prisma schema.
+    await this.prisma.gelombang.delete({ where: { id } });
 
-    return updated;
+    await this.audit
+      .create({
+        userId: actorUserId ?? null,
+        action: 'gelombang.deleted',
+        module: 'gelombang',
+        entityType: 'Gelombang',
+        entityId: id,
+        meta: {
+          name: existing.name,
+          startDate: existing.startDate,
+          endDate: existing.endDate,
+          isActive: existing.isActive,
+        },
+      })
+      .catch(() => null);
+
+    return {
+      deleted: true,
+      id,
+      name: existing.name,
+    };
   }
 }

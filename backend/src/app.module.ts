@@ -12,7 +12,6 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { JurusanModule } from './jurusan/jurusan.module';
 import { GelombangModule } from './gelombang/gelombang.module';
 import { PendaftarModule } from './pendaftar/pendaftar.module';
-import { PembayaranModule } from './pembayaran/pembayaran.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { StatistikModule } from './statistik/statistik.module';
 import { ExportModule } from './export/export.module';
@@ -20,6 +19,13 @@ import { HealthModule } from './health/health.module';
 import { UploadModule } from './upload/upload.module';
 import { BeritaModule } from './berita/berita.module';
 import { PengumumanModule } from './pengumuman/pengumuman.module';
+import { SettingsModule } from './settings/settings.module';
+import { RekapModule } from './rekap/rekap.module';
+import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { LaporanModule } from './laporan/laporan.module';
+import { FonnteModule } from './fonnte/fonnte.module';
+import { RekapHarianModule } from './rekap-harian/rekap-harian.module';
+import { TahunAjaranModule } from './tahun-ajaran/tahun-ajaran.module';
 
 @Module({
   imports: [
@@ -44,7 +50,6 @@ import { PengumumanModule } from './pengumuman/pengumuman.module';
     JurusanModule,
     GelombangModule,
     PendaftarModule,
-    PembayaranModule,
     AuditLogModule,
     StatistikModule,
     ExportModule,
@@ -52,6 +57,12 @@ import { PengumumanModule } from './pengumuman/pengumuman.module';
     UploadModule,
     BeritaModule,
     PengumumanModule,
+    RekapModule,
+    WhatsappModule,
+    LaporanModule,
+    FonnteModule,
+    RekapHarianModule,
+    TahunAjaranModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

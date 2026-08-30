@@ -217,12 +217,11 @@ export default function LandingPage() {
             Alur Pendaftaran
           </motion.h2>
 
-          <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
             {[
               { n: 1, t: 'Isi Formulir', d: 'Lengkapi formulir pendaftaran online dengan data yang benar.' },
-              { n: 2, t: 'Verifikasi Berkas', d: 'Admin sekolah memverifikasi data Anda.' },
-              { n: 3, t: 'Input Pembayaran', d: 'Jika lolos, lakukan transfer & input data bukti bayar.' },
-              { n: 4, t: 'Siswa Aktif', d: 'Setelah disetujui, Anda resmi menjadi siswa SMK PGRI 3 Denpasar.' },
+              { n: 2, t: 'Persetujuan Admin', d: 'Panitia SPMB memverifikasi & menyetujui pendaftaran Anda.' },
+              { n: 3, t: 'Siswa Aktif', d: 'Setelah disetujui, Anda resmi menjadi siswa SMK PGRI 3 Denpasar. Datang ke sekolah untuk daftar ulang fisik.' },
             ].map((s, i) => (
               <motion.div
                 key={s.n}

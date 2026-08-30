@@ -15,6 +15,8 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  /** Re-fetch current user info dari /auth/me (untuk update UI setelah edit profil/WA). */
+  refreshUser: () => Promise<void>;
   hasPermission: (code: string) => boolean;
   hasAnyRole: (...roles: string[]) => boolean;
 }
@@ -56,6 +58,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     location.href = '/login';
   }, []);
 
+  /**
+   * Re-fetch current user info dari /auth/me. Pakai ini setelah edit
+   * profil/nomor WA sendiri supaya badge & permission di UI ikut update
+   * tanpa harus logout/login ulang.
+   */
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await api.get('/auth/me');
+      setUser(res.data);
+    } catch {
+      // Token invalid / expired — biarkan saja; interceptor API akan handle.
+    }
+  }, []);
+
   const hasPermission = useCallback(
     (code: string) => !!user?.permissions?.includes(code),
     [user],
@@ -67,7 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasPermission, hasAnyRole }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, hasPermission, hasAnyRole }}>
       {children}
     </AuthContext.Provider>
   );

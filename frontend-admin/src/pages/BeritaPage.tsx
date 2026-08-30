@@ -6,6 +6,7 @@ import { api, fotoUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { BERITA_STATUS_COLORS, BERITA_STATUS_LABELS } from '../lib/constants';
 import UploadFotoField from '../components/UploadFotoField';
+import HistoryTab from '../components/HistoryTab';
 
 type Tab = 'list' | 'history';
 
@@ -437,108 +438,5 @@ export default function BeritaPage() {
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function HistoryTab({ module, title }: { module: string; title: string }) {
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await api.get('/audit-logs', {
-          params: { module, pageSize: 100 },
-        });
-        setItems(res.data.items);
-      } catch (e: any) {
-        toast.error(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [module]);
-
-  const actionLabel = (a: string) => {
-    switch (a) {
-      case 'berita.created':
-        return 'Tambah Berita';
-      case 'berita.updated':
-        return 'Edit Berita';
-      case 'berita.deleted':
-        return 'Hapus Berita';
-      case 'berita.restored':
-        return 'Restore Berita';
-      default:
-        return a;
-    }
-  };
-
-  const actionColor = (a: string) => {
-    if (a.endsWith('.deleted')) return 'bg-red-100 text-red-700';
-    if (a.endsWith('.created')) return 'bg-emerald-100 text-emerald-700';
-    if (a.endsWith('.restored')) return 'bg-blue-100 text-blue-700';
-    return 'bg-slate-100 text-slate-700';
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.18 }}
-    >
-      <p className="mb-3 text-sm text-slate-600">{title}</p>
-      <div className="card overflow-hidden p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="border-b border-slate-200 bg-slate-50">
-              <tr>
-                <th className="table-th">Waktu</th>
-                <th className="table-th">User</th>
-                <th className="table-th">Aksi</th>
-                <th className="table-th">Detail</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={4} className="table-td text-center text-slate-500">
-                    Memuat…
-                  </td>
-                </tr>
-              ) : items.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="table-td text-center text-slate-500">
-                    Belum ada riwayat
-                  </td>
-                </tr>
-              ) : (
-                items.map((l) => (
-                  <tr key={l.id}>
-                    <td className="table-td whitespace-nowrap text-xs text-slate-500">
-                      {new Date(l.createdAt).toLocaleString('id-ID')}
-                    </td>
-                    <td className="table-td">
-                      <div className="text-sm">{l.user?.name || '-'}</div>
-                      <div className="text-xs text-slate-500">{l.user?.email}</div>
-                    </td>
-                    <td className="table-td">
-                      <span className={`badge ${actionColor(l.action)}`}>{actionLabel(l.action)}</span>
-                    </td>
-                    <td className="table-td text-xs text-slate-600">
-                      <pre className="whitespace-pre-wrap break-words">
-                        {JSON.stringify(l.meta, null, 2)}
-                      </pre>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </motion.div>
   );
 }

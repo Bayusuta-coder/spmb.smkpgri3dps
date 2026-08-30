@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, UseFormRegisterReturn } from 'react-hook-form';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -11,17 +11,65 @@ interface FormData {
   jenisKelamin: 'L' | 'P';
   tempatLahir: string;
   tanggalLahir: string;
-  nisn: string;
+  /** NISN opsional — boleh kosong. Kalau diisi, harus 10 digit angka. */
+  nisn?: string;
   sekolahAsal: string;
   alamat: string;
   noTelp: string;
   email?: string;
-  jumlahNilaiUn: number;
+  /** Nilai UN opsional — boleh kosong (homeschooling / pindahan / sekolah
+   *  tanpa UN). Kalau diisi, harus 0-100. Disimpan sebagai null di DB. */
+  jumlahNilaiUn?: number;
   prestasi?: string;
   namaIbu: string;
   noTelpOrtu: string;
+  agama: 'ISLAM' | 'KRISTEN' | 'KATOLIK' | 'HINDU' | 'BUDDHA' | 'KHONGHUCU' | '';
   jurusanId: string;
   gelombangId: string;
+}
+
+const AGAMA_OPTIONS: Array<{ value: FormData['agama']; label: string }> = [
+  { value: '', label: '— Pilih —' },
+  { value: 'ISLAM', label: 'Islam' },
+  { value: 'KRISTEN', label: 'Kristen' },
+  { value: 'KATOLIK', label: 'Katolik' },
+  { value: 'HINDU', label: 'Hindu' },
+  { value: 'BUDDHA', label: 'Buddha' },
+  { value: 'KHONGHUCU', label: 'Khonghucu' },
+];
+
+/**
+ * Wrapper untuk result dari react-hook-form `register()` yang otomatis
+ * meng-uppercase nilai input SEBELUM masuk ke form state. Tujuannya:
+ * konsistensi data di DB (semua nama/alamat/sekolah uppercase), sehingga
+ * pendaftar tidak perlu mengetik Caps Lock manual.
+ *
+ * Diterapkan HANYA untuk field teks biasa. Field khusus (email, noTelp,
+ * NISN, date, number, select) TIDAK boleh di-uppercase — pakai `register()`
+ * bawaan untuk field-field itu.
+ *
+ * Catatan teknis:
+ * - `setNativeValue` di-skip karena `target.value = upper` sudah cukup
+ *   untuk input HTML standar; React akan sinkron di next render.
+ * - Jangan apply ke select/date/number — TS type system tidak bisa enforce,
+ *   jadi konvensi: hanya apply `upperRegister` ke field teks (input type=text,
+ *   input type=email tanpa uppercase, textarea).
+ */
+function upperRegister(base: UseFormRegisterReturn): UseFormRegisterReturn {
+  // Cast ke any untuk menghindari komplain tipe dari react-hook-form v7
+  // yang expects ChangeHandler generic dengan banyak tipe event berbeda.
+  // Intinya: mutate target.value jadi uppercase, lalu delegate ke base.onChange.
+  const wrapped: any = { ...base };
+  wrapped.onChange = (e: any) => {
+    const target = e.target as HTMLInputElement | HTMLTextAreaElement;
+    const original = target.value;
+    const upper = original.toUpperCase();
+    if (original !== upper) {
+      target.value = upper;
+    }
+    base.onChange(e);
+  };
+  return wrapped as UseFormRegisterReturn;
 }
 
 export default function RegisterPage() {
@@ -55,7 +103,16 @@ export default function RegisterPage() {
     try {
       const res = await api.post<RegisterResponse>('/pendaftar/register', {
         ...data,
-        jumlahNilaiUn: Number(data.jumlahNilaiUn),
+        // '' tidak valid untuk enum Agama di backend — pastikan value selalu terisi
+        // (sudah divalidasi required di register(), ini hanya safety belt)
+        agama: (data.agama || undefined) as FormData['agama'],
+        // Nilai UN opsional — kirim hanya jika diisi (backend handles null)
+        jumlahNilaiUn:
+          data.jumlahNilaiUn != null && !Number.isNaN(data.jumlahNilaiUn)
+            ? Number(data.jumlahNilaiUn)
+            : undefined,
+        // NISN opsional — kirim hanya jika diisi (backend sudah handle empty)
+        nisn: data.nisn?.trim() || undefined,
       });
       setResult(res.data);
       toast.success('Pendaftaran berhasil! Simpan nomor pendaftaran Anda.');
@@ -154,7 +211,7 @@ export default function RegisterPage() {
                 <input
                   className="input"
                   placeholder="Sesuai ijazah / akta kelahiran"
-                  {...register('namaLengkap', { required: 'Wajib diisi' })}
+                  {...upperRegister(register('namaLengkap', { required: 'Wajib diisi' }))}
                 />
               </Field>
 
@@ -170,13 +227,20 @@ export default function RegisterPage() {
                   </select>
                 </Field>
 
-                <Field label="NISN *" error={errors.nisn?.message}>
+                {/* NISN OPSIONAL — boleh kosong (homeschooling / pindahan).
+                    Kalau diisi, harus 10 digit angka. Kalau kosong, format
+                    validation di-skip. */}
+                <Field
+                  label="NISN (opsional)"
+                  error={errors.nisn?.message}
+                  hint="Boleh kosong. Jika diisi, harus 10 digit angka."
+                >
                   <input
                     className="input"
                     placeholder="10 digit"
                     maxLength={10}
+                    inputMode="numeric"
                     {...register('nisn', {
-                      required: 'Wajib diisi',
                       pattern: { value: /^\d{10}$/, message: 'NISN harus 10 digit angka' },
                     })}
                   />
@@ -185,7 +249,10 @@ export default function RegisterPage() {
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Field label="Tempat Lahir *" error={errors.tempatLahir?.message}>
-                  <input className="input" {...register('tempatLahir', { required: 'Wajib diisi' })} />
+                  <input
+                    className="input"
+                    {...upperRegister(register('tempatLahir', { required: 'Wajib diisi' }))}
+                  />
                 </Field>
                 <Field label="Tanggal Lahir *" error={errors.tanggalLahir?.message}>
                   <input
@@ -195,13 +262,34 @@ export default function RegisterPage() {
                   />
                 </Field>
               </div>
+              <Field label="Agama *" error={errors.agama?.message}>
+                <select
+                  className="input"
+                  {...register('agama', { required: 'Wajib dipilih' })}
+                >
+                  {AGAMA_OPTIONS.map((o) => (
+                    <option key={o.value || 'empty'} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             </Section>
 
             <Section title="Asal Sekolah & Nilai">
               <Field label="Sekolah Asal *" error={errors.sekolahAsal?.message}>
-                <input className="input" {...register('sekolahAsal', { required: 'Wajib diisi' })} />
+                <input
+                  className="input"
+                  {...upperRegister(register('sekolahAsal', { required: 'Wajib diisi' }))}
+                />
               </Field>
-              <Field label="Jumlah Nilai UN (rata-rata) *" error={errors.jumlahNilaiUn?.message}>
+              {/* Nilai UN OPSIONAL — boleh kosong (homeschooling / pindahan /
+                  sekolah tanpa UN). Kalau diisi, validasi 0-100 tetap aktif. */}
+              <Field
+                label="Jumlah Nilai UN (rata-rata, opsional)"
+                error={errors.jumlahNilaiUn?.message}
+                hint="Boleh kosong. Jika diisi, gunakan nilai rata-rata 0-100."
+              >
                 <input
                   className="input"
                   type="number"
@@ -209,7 +297,9 @@ export default function RegisterPage() {
                   min={0}
                   max={100}
                   {...register('jumlahNilaiUn', {
-                    required: 'Wajib diisi',
+                    // Tidak ada `required` — field ini opsional. Validasi min/max
+                    // hanya trigger kalau field diisi. react-hook-form skip
+                    // validation untuk empty string, jadi cukup hapus required.
                     valueAsNumber: true,
                     min: { value: 0, message: 'Tidak boleh negatif' },
                     max: { value: 100, message: 'Maksimal 100' },
@@ -220,7 +310,7 @@ export default function RegisterPage() {
                 <textarea
                   className="input min-h-[80px]"
                   placeholder="Contoh: Juara 1 Lomba Robotik Tingkat Provinsi"
-                  {...register('prestasi')}
+                  {...upperRegister(register('prestasi'))}
                 />
               </Field>
             </Section>
@@ -229,7 +319,7 @@ export default function RegisterPage() {
               <Field label="Alamat Lengkap *" error={errors.alamat?.message}>
                 <textarea
                   className="input min-h-[80px]"
-                  {...register('alamat', { required: 'Wajib diisi' })}
+                  {...upperRegister(register('alamat', { required: 'Wajib diisi' }))}
                 />
               </Field>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -266,7 +356,10 @@ export default function RegisterPage() {
                 />
               </Field>
               <Field label="Nama Ibu Kandung *" error={errors.namaIbu?.message}>
-                <input className="input" {...register('namaIbu', { required: 'Wajib diisi' })} />
+                <input
+                  className="input"
+                  {...upperRegister(register('namaIbu', { required: 'Wajib diisi' }))}
+                />
               </Field>
             </Section>
 
@@ -336,15 +429,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Field({
   label,
   error,
+  hint,
   children,
 }: {
   label: string;
   error?: string;
+  /** Petunjuk kecil di bawah label, di atas input — mis. "Boleh kosong" untuk field opsional. */
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
     <div>
       <label className="label">{label}</label>
+      {hint && <p className="mb-1 text-xs text-slate-500">{hint}</p>}
       {children}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>

@@ -92,11 +92,21 @@ export class JurusanService {
       where: { jurusanId: id, status: { not: 'DITOLAK' } },
     });
 
+    // Snapshot nama/email user yang menghapus — readable walau user dihapus.
+    const deleterSnap = actorUserId
+      ? await this.prisma.user.findUnique({
+          where: { id: actorUserId },
+          select: { name: true, email: true },
+        })
+      : null;
+
     const updated = await this.prisma.jurusan.update({
       where: { id },
       data: {
         deletedAt: new Date(),
         deletedByUserId: actorUserId,
+        deletedByNama: deleterSnap?.name ?? null,
+        deletedByEmail: deleterSnap?.email ?? null,
         isActive: false,
       },
     });

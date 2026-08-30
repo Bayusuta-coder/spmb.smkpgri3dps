@@ -13,8 +13,9 @@ import {
   GraduationCap,
   AlertTriangle,
   ArrowLeft,
+  Printer,
 } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, getApiBaseUrl } from '../lib/api';
 import { STATUS_COLORS, STATUS_LABELS } from '../lib/types';
 import type { VerifyInfoResponse } from '../lib/types';
 
@@ -76,7 +77,7 @@ export default function VerifikasiPage() {
       <div className="mx-auto max-w-2xl">
         {state.kind === 'loading' && <LoadingCard />}
         {state.kind === 'error' && <ErrorCard message={state.message} />}
-        {state.kind === 'ok' && <SuccessCard data={state.data} />}
+        {state.kind === 'ok' && <SuccessCard data={state.data} token={token} />}
       </div>
     </motion.div>
   );
@@ -110,7 +111,7 @@ function ErrorCard({ message }: { message: string }) {
   );
 }
 
-function SuccessCard({ data }: { data: VerifyInfoResponse }) {
+function SuccessCard({ data, token }: { data: VerifyInfoResponse; token: string }) {
   const tglDaftarUlang = data.gelombang.tanggalDaftarUlang
     ? new Date(data.gelombang.tanggalDaftarUlang).toLocaleDateString('id-ID', {
         weekday: 'long',
@@ -244,6 +245,28 @@ function SuccessCard({ data }: { data: VerifyInfoResponse }) {
         )
       )}
 
+      {/* Aksi Petugas — tombol Cetak PDF saat siswa hadir */}
+      {data.isActive && (
+        <div className="card border-2 border-primary-200 bg-primary-50/30">
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+            <div className="flex items-start gap-3">
+              <Printer size={28} className="shrink-0 text-primary-700" />
+              <div>
+                <h3 className="font-semibold text-slate-900">Aksi Petugas</h3>
+                <p className="mt-0.5 text-sm text-slate-600">
+                  Cetak bukti pendaftaran ulang PDF untuk diberikan ke siswa / ditempel di
+                  dokumen daftar ulang.
+                </p>
+              </div>
+            </div>
+            <CetakPdfButton
+              registrationNumber={data.registrationNumber}
+              token={token}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Footer sekolah */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 text-center text-xs text-slate-500">
         <p className="flex items-center justify-center gap-1.5 font-medium text-slate-700">
@@ -284,5 +307,38 @@ function Row({
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * Tombol Cetak PDF — buka PDF di tab baru lewat endpoint publik signature-based.
+ * `token` dari URL verifikasi == pdfSignature yang sama-sama di-encode ke QR,
+ * jadi kita bisa pakai langsung untuk download (lihat pdf.service.ts buildVerificationUrl).
+ */
+function CetakPdfButton({
+  registrationNumber,
+  token,
+}: {
+  registrationNumber: string;
+  token: string;
+}) {
+  const handleClick = () => {
+    if (!token) {
+      alert('Token tidak tersedia — PDF tidak bisa dicetak.');
+      return;
+    }
+    const apiOrigin = getApiBaseUrl().replace(/\/api$/, '');
+    const url = `${apiOrigin}/pendaftar/check/${encodeURIComponent(registrationNumber)}/download-pdf?s=${encodeURIComponent(token)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      className="ml-auto inline-flex items-center gap-2 rounded-md bg-primary-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-primary-700"
+    >
+      <Printer size={16} />
+      Cetak Bukti PDF
+    </button>
   );
 }

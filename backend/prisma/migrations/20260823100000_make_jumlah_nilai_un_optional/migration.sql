@@ -1,0 +1,23 @@
+-- Make Jumlah Nilai UN field optional
+--
+-- Sebelumnya field jumlahNilaiUn WAJIB diisi (NOT NULL) dan divalidasi di
+-- form pendaftaran dengan `@IsNumber() @Min(0)`. Namun banyak calon pendaftar
+-- (terutama yang berasal dari homeschooling, pindahan dari luar daerah, atau
+-- yang sekolah asalnya tidak mengikuti UN) belum punya nilai UN resmi saat
+-- mendaftar.
+--
+-- Setelah perubahan ini:
+--   - jumlahNilaiUn menjadi opsional (boleh kosong)
+--   - Kalau diisi, tetap divalidasi 0-100 di DTO + service
+--   - Kalau kosong, disimpan sebagai NULL (Decimal nullable)
+--   - Ditampilkan sebagai '-' di PDF (konsisten dengan pola NISN)
+--
+-- Lihat perubahan terkait di:
+--   - backend/prisma/schema.prisma (jumlahNilaiUn Decimal?)
+--   - backend/src/pendaftar/pendaftar.controller.ts (RegisterPendaftarDto)
+--   - backend/src/pendaftar/pendaftar.service.ts (skip Decimal conversion kalau null)
+--   - backend/src/pdf/pdf.service.ts (row Nilai UN ditambahkan, tampil '-' kalau null)
+--   - frontend-user/src/pages/RegisterPage.tsx (form: Nilai UN opsional)
+
+-- AlterTable
+ALTER TABLE "pendaftar_spmb" ALTER COLUMN "jumlahNilaiUn" DROP NOT NULL;

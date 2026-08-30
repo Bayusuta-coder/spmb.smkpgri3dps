@@ -1,23 +1,20 @@
 export type StatusPendaftar =
-  | 'MENUNGGU_VERIFIKASI'
+  | 'MENUNGGU_PERSETUJUAN'
   | 'DITOLAK'
-  | 'LOLOS_MENUNGGU_DAFTAR_ULANG'
-  | 'MENUNGGU_VERIFIKASI_PEMBAYARAN'
   | 'SISWA_AKTIF';
 
+// Label publik untuk orang tua murid — friendly, hindari istilah teknis.
+// Backend mengirim status internal (MENUNGGU_PERSETUJUAN), frontend mapping
+// ke label yang lebih mudah dipahami ("Menunggu Daftar Ulang").
 export const STATUS_LABELS: Record<StatusPendaftar, string> = {
-  MENUNGGU_VERIFIKASI: 'Menunggu Verifikasi',
+  MENUNGGU_PERSETUJUAN: 'Menunggu Daftar Ulang',
   DITOLAK: 'Ditolak',
-  LOLOS_MENUNGGU_DAFTAR_ULANG: 'Lolos - Menunggu Daftar Ulang',
-  MENUNGGU_VERIFIKASI_PEMBAYARAN: 'Menunggu Verifikasi Pembayaran',
   SISWA_AKTIF: 'Siswa Aktif',
 };
 
 export const STATUS_COLORS: Record<StatusPendaftar, string> = {
-  MENUNGGU_VERIFIKASI: 'bg-amber-100 text-amber-800 border border-amber-200',
+  MENUNGGU_PERSETUJUAN: 'bg-amber-100 text-amber-800 border border-amber-200',
   DITOLAK: 'bg-red-100 text-red-800 border border-red-200',
-  LOLOS_MENUNGGU_DAFTAR_ULANG: 'bg-blue-100 text-blue-800 border border-blue-200',
-  MENUNGGU_VERIFIKASI_PEMBAYARAN: 'bg-purple-100 text-purple-800 border border-purple-200',
   SISWA_AKTIF: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
 };
 
@@ -51,17 +48,9 @@ export interface CheckStatusResponse {
   status: StatusPendaftar;
   statusLabel: string;
   rejectionNote: string | null;
-  canInputPayment: boolean;
   hasPdf: boolean;
   pdfDownloadUrl: string | null;
   daftarUlangConfirmedAt: string | null;
-  pembayaran: {
-    nominal: string;
-    tanggalTransfer: string;
-    namaPengirim: string;
-    status: 'MENUNGGU_VERIFIKASI' | 'TERVERIFIKASI' | 'BELUM_DITEMUKAN';
-    note: string | null;
-  } | null;
   createdAt: string;
 }
 
@@ -87,6 +76,7 @@ export interface VerifyInfoResponse {
   status: StatusPendaftar;
   statusLabel: string;
   isActive: boolean;
+  pdfSignature?: string | null;
   jurusan: { code: string; name: string };
   gelombang: {
     name: string;
