@@ -19,6 +19,8 @@
     "seed:run": "ts-node prisma/seed.ts",
     "seed:testing": "ts-node prisma/seed-testing-export.ts",
     "seed:cleanup-export-test": "ts-node prisma/seed-cleanup-export-test.ts",
+    "seed:dummy": "ts-node prisma/seed-dummy-spmb.ts",
+    "seed:cleanup-dummy": "ts-node prisma/seed-cleanup-dummy.ts",
     "user:set-password": "node scripts/set-superadmin-password.js",
     "generate:kop-surat": "ts-node scripts/generate-kop-surat.ts",
     "test": "jest",
