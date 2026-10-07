@@ -1,8 +1,11 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { RekapService, RekapFilter } from './rekap.service';
 
+@ApiTags('Rekap')
+@ApiBearerAuth('bearer')
 @Controller('rekap')
 export class RekapController {
   constructor(private readonly service: RekapService) {}

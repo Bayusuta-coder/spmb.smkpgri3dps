@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { toast } from 'sonner';
 import LogEntryCard from '../components/LogEntryCard';
 import { formatLogDetail } from '../lib/logFormatter';
+import { CustomSelect } from '../components/CustomSelect';
 
 /**
  * Audit Log page — global log viewer.
@@ -11,6 +12,11 @@ import { formatLogDetail } from '../lib/logFormatter';
  * Card/timeline layout (BUKAN tabel) menggunakan <LogEntryCard /> yang
  * sama dengan halaman Riwayat lain (Gelombang, Jurusan, Berita,
  * Pengumuman, Role Permission) supaya styling konsisten.
+ *
+ * Filter modul diperbaiki (F3a): sekarang lengkap sesuai module yang ditulis
+ * oleh backend — sebelumnya dropdown punya 'payment' & 'spmb' (redundant)
+ * tapi TIDAK punya 'pendaftar' dan 'settings' sehingga log pembayaran &
+ * perubahan harga tidak pernah muncul kecuali user pilih "Semua".
  */
 export default function AuditLogPage() {
   const [items, setItems] = useState<any[]>([]);
@@ -51,22 +57,24 @@ export default function AuditLogPage() {
 
       <div className="card mb-4 flex items-center gap-2">
         <label className="text-sm text-slate-600">Filter Modul:</label>
-        <select
-          className="input w-auto"
+        <CustomSelect
+          containerClassName="w-auto"
+          className="w-auto"
           value={moduleFilter}
           onChange={(e) => setModuleFilter(e.target.value)}
         >
           <option value="">Semua</option>
-          <option value="spmb">SPMB</option>
-          <option value="payment">Payment</option>
+          <option value="pendaftar">Pendaftar (pembayaran, ukuran baju, edit data)</option>
+          <option value="spmb">SPMB (verifikasi, scan, regenerate PDF)</option>
+          <option value="settings">Settings (harga daftar ulang, dll)</option>
           <option value="gelombang">Gelombang</option>
           <option value="jurusan">Jurusan</option>
           <option value="berita">Berita</option>
           <option value="pengumuman">Pengumuman</option>
           <option value="user">User</option>
-          <option value="role">Role</option>
-          <option value="auth">Auth</option>
-        </select>
+          <option value="role">Role &amp; Permission</option>
+          <option value="auth">Auth (login, password reset)</option>
+        </CustomSelect>
       </div>
 
       {loading ? (

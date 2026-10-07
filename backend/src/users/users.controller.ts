@@ -25,10 +25,12 @@ import {
   ValidationArguments,
 } from 'class-validator';
 import type { Request } from 'express';
+import { ApiBearerAuth, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { CurrentUser, JwtUserPayload } from '../common/decorators/current-user.decorator';
 import { normalizePhoneNumber } from '../whatsapp/whatsapp.util';
+import { IsIndonesianPhone } from '../common/validators/is-indonesian-phone.validator';
 
 /**
  * User-management endpoints (create / update / reset-password / delete) DIBATASI
@@ -67,17 +69,21 @@ class IsWhatsappNumberConstraint implements ValidatorConstraintInterface {
 }
 
 class CreateUserDto {
+  @ApiProperty({ type: String, description: 'Email unik user (digunakan untuk login)' })
   @IsEmail()
   email!: string;
 
+  @ApiProperty({ type: String, description: 'Nama lengkap user' })
   @IsString()
   @IsNotEmpty()
   name!: string;
 
+  @ApiProperty({ type: String, minLength: 8, description: 'Password awal user (minimal 8 karakter)' })
   @IsString()
   @MinLength(8, { message: 'Password minimal 8 karakter' })
   password!: string;
 
+  @ApiProperty({ type: [String], description: 'Daftar ID role yang dimiliki user' })
   @IsArray()
   @IsString({ each: true })
   roleIds!: string[];
@@ -85,40 +91,49 @@ class CreateUserDto {
   // WhatsApp — opsional. User yang akan menerima laporan/notifikasi WA
   // boleh dibuat tanpa nomor dulu (status: belum terverifikasi). Admin
   // bisa tambahkan nanti lewat profile atau WhatsappController admin endpoint.
+  @ApiPropertyOptional({ type: String, description: 'Nomor WhatsApp user (format Indonesia, diahului 08). Opsional' })
   @IsOptional()
   @IsString()
-  @Validate(IsWhatsappNumberConstraint)
+  @IsIndonesianPhone({ message: 'Nomor WhatsApp harus diawali 08 dan 10–13 digit angka' })
   whatsappNumber?: string;
 }
 
 class UpdateUserDto {
+  @ApiPropertyOptional({ type: String, description: 'Nama lengkap user' })
   @IsOptional() @IsString() @IsNotEmpty()
   name?: string;
 
   // Email editable oleh Superadmin (mis. user ganti email kantor → kantor).
   // Service tetap validasi unique.
+  @ApiPropertyOptional({ type: String, description: 'Email unik user' })
   @IsOptional() @IsEmail()
   email?: string;
 
+  @ApiPropertyOptional({ type: Boolean, description: 'Apakah user aktif' })
   @IsOptional() @IsBoolean()
   isActive?: boolean;
 
+  @ApiPropertyOptional({ type: [String], description: 'Daftar ID role yang dimiliki user' })
   @IsOptional() @IsArray() @IsString({ each: true })
   roleIds?: string[];
 
   // Kalau di-set dan nilainya berubah dari existing, service otomatis reset
   // `whatsappVerifiedAt` ke null — user harus verifikasi ulang.
+  @ApiPropertyOptional({ type: String, description: 'Nomor WhatsApp user (format Indonesia)' })
   @IsOptional()
   @IsString()
-  @Validate(IsWhatsappNumberConstraint)
+  @IsIndonesianPhone({ message: 'Nomor WhatsApp harus diawali 08 dan 10–13 digit angka' })
   whatsappNumber?: string;
 }
 
 class ResetPasswordDto {
+  @ApiProperty({ type: String, minLength: 8, description: 'Password baru user (minimal 8 karakter)' })
   @IsString() @MinLength(8)
   newPassword!: string;
 }
 
+@ApiTags('users')
+@ApiBearerAuth('bearer')
 @Controller('users')
 export class UsersController {
   constructor(private readonly users: UsersService) {}

@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { IsArray, IsOptional, IsString } from 'class-validator';
+import { ApiBearerAuth, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { RolesService } from './roles.service';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { RolesOnly } from '../common/decorators/roles-only.decorator';
@@ -18,14 +19,20 @@ import { RolesOnlyGuard } from '../common/guards/roles-only.guard';
 import { CurrentUser, JwtUserPayload } from '../common/decorators/current-user.decorator';
 
 class CreateRoleDto {
+  @ApiProperty({ type: String, description: 'Nama role (mis. "Admin", "TU", "Bendahara")' })
   @IsString() name!: string;
+  @ApiPropertyOptional({ type: String, description: 'Deskripsi role (opsional)' })
   @IsOptional() @IsString() description?: string;
+  @ApiProperty({ type: [String], description: 'Daftar ID permission yang dimiliki role ini' })
   @IsArray() @IsString({ each: true }) permissionIds!: string[];
 }
 
 class UpdateRoleDto {
+  @ApiPropertyOptional({ type: String, description: 'Nama role' })
   @IsOptional() @IsString() name?: string;
+  @ApiPropertyOptional({ type: String, description: 'Deskripsi role' })
   @IsOptional() @IsString() description?: string;
+  @ApiPropertyOptional({ type: [String], description: 'Daftar ID permission yang dimiliki role ini' })
   @IsOptional() @IsArray() @IsString({ each: true }) permissionIds?: string[];
 }
 
@@ -40,6 +47,8 @@ class UpdateRoleDto {
  * self-promote jadi Superadmin. Dengan @RolesOnly('Superadmin'), pengecekan
  * pakai ROLE NAME yang ada di JWT payload, tidak bisa di-bypass dari UI.
  */
+@ApiTags('roles')
+@ApiBearerAuth('bearer')
 @Controller('roles')
 @UseGuards(RolesOnlyGuard)
 export class RolesController {

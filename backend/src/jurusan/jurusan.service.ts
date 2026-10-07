@@ -18,15 +18,54 @@ export class JurusanService {
   /**
    * findAll default mengecualikan jurusan yang sudah di-soft-delete.
    * Pakai includeDeleted=true untuk melihat termasuk yang sudah dihapus.
+   *
+   * Backward-compatible:
+   *   - Tanpa page/pageSize → return plain array (dipakai publicList, dropdown, dll).
+   *   - Dengan page/pageSize → return paginated shape `{ items, total, page,
+   *     pageSize, totalPages }` (dipakai admin list).
    */
-  async findAll(opts: { activeOnly?: boolean; includeDeleted?: boolean } = {}) {
+  async findAll(
+    opts: {
+      activeOnly?: boolean;
+      includeDeleted?: boolean;
+      page?: number;
+      pageSize?: number;
+    } = {},
+  ) {
     const where: Prisma.JurusanWhereInput = {};
     if (!opts.includeDeleted) where.deletedAt = null;
     if (opts.activeOnly) where.isActive = true;
-    return this.prisma.jurusan.findMany({
-      where,
-      orderBy: { code: 'asc' },
-    });
+
+    const wantsPagination =
+      typeof opts.page === 'number' || typeof opts.pageSize === 'number';
+
+    if (!wantsPagination) {
+      return this.prisma.jurusan.findMany({
+        where,
+        orderBy: { code: 'asc' },
+      });
+    }
+
+    const page = Math.max(1, opts.page ?? 1);
+    const pageSize = Math.min(200, Math.max(1, opts.pageSize ?? 20));
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.jurusan.findMany({
+        where,
+        orderBy: { code: 'asc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.jurusan.count({ where }),
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    };
   }
 
   async findOne(id: string) {

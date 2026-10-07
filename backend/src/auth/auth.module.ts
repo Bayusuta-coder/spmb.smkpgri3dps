@@ -13,6 +13,9 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
 // EmailModule di-import di sini sekalian (meskipun @Global, explicit lebih jelas)
 // untuk dokumentasi dependency auth → email.
 import { EmailModule } from '../email/email.module';
+// PermissionsModule di-import supaya PermissionsGuard (yang re-fetch permission
+// fresh dari DB setiap request — Fix B2) bisa inject PermissionsService.
+import { PermissionsModule } from '../permissions/permissions.module';
 
 @Module({
   imports: [
@@ -31,6 +34,7 @@ import { EmailModule } from '../email/email.module';
     }),
     AuditLogModule, // untuk AuthService.requestPasswordReset/resetPassword audit
     EmailModule,
+    PermissionsModule,
   ],
   controllers: [AuthController],
   providers: [

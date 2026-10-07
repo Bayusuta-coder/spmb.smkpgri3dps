@@ -104,7 +104,11 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Gelombang aktif + kuota */}
+      {/* Gelombang aktif — informasi gelombang yang sedang berjalan.
+          Card per-jurusan dengan sisa kuota TIDAK lagi ditampilkan di
+          halaman ini (lihat keputusan product: cukup Admin saja yang
+          melihat kuota per jurusan). Endpoint backend tetap memuat data
+          kuota; hanya render di FE yang disembunyikan. */}
       <section className="container-page py-12 md:py-16">
         <motion.div
           initial={{ y: 20, opacity: 0 }}
@@ -113,22 +117,18 @@ export default function LandingPage() {
           transition={{ duration: 0.5 }}
         >
           <h2 className="text-2xl font-bold text-slate-900 md:text-3xl">
-            Gelombang & Kuota
+            Gelombang Aktif
           </h2>
           <p className="mt-2 text-slate-600">
-            Informasi gelombang SPMB yang sedang aktif dan sisa kuota per jurusan.
+            Informasi gelombang SPMB yang sedang berjalan saat ini.
           </p>
         </motion.div>
 
         {loading ? (
-          <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="card animate-pulse">
-                <div className="h-4 w-24 rounded bg-slate-200" />
-                <div className="mt-3 h-6 w-40 rounded bg-slate-200" />
-                <div className="mt-6 h-2 rounded bg-slate-200" />
-              </div>
-            ))}
+          <div className="card mt-8 animate-pulse">
+            <div className="h-4 w-24 rounded bg-slate-200" />
+            <div className="mt-3 h-6 w-48 rounded bg-slate-200" />
+            <div className="mt-2 h-3 w-32 rounded bg-slate-200" />
           </div>
         ) : !active ? (
           <div className="card mt-8 text-center">
@@ -144,7 +144,7 @@ export default function LandingPage() {
             transition={{ duration: 0.5, delay: 0.1 }}
             className="mt-8"
           >
-            <div className="card mb-6">
+            <div className="card">
               <div className="flex flex-col items-start justify-between gap-2 md:flex-row md:items-center">
                 <div>
                   <span className="badge bg-emerald-100 text-emerald-700">Aktif</span>
@@ -164,43 +164,6 @@ export default function LandingPage() {
                 </Link>
               </div>
             </div>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {active.details.map((d, i) => (
-                <motion.div
-                  key={d.jurusanId}
-                  initial={{ y: 20, opacity: 0 }}
-                  whileInView={{ y: 0, opacity: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.4, delay: i * 0.05 }}
-                  className="card"
-                >
-                  <span className="badge bg-primary-100 text-primary-700">
-                    {d.jurusanCode}
-                  </span>
-                  <h4 className="mt-2 text-lg font-semibold text-slate-900">
-                    {d.jurusanName}
-                  </h4>
-                  <div className="mt-4">
-                    <div className="flex items-baseline justify-between text-sm">
-                      <span className="text-slate-500">Sisa Kuota</span>
-                      <span className="font-semibold text-slate-900">
-                        {d.remaining} / {d.quota}
-                      </span>
-                    </div>
-                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        whileInView={{ width: `${(d.used / d.quota) * 100}%` }}
-                        viewport={{ once: true }}
-                        transition={{ duration: 0.8, delay: 0.2 }}
-                        className="h-full bg-gradient-to-r from-primary-500 to-accent-400"
-                      />
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
           </motion.div>
         )}
       </section>
@@ -219,9 +182,21 @@ export default function LandingPage() {
 
           <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
             {[
-              { n: 1, t: 'Isi Formulir', d: 'Lengkapi formulir pendaftaran online dengan data yang benar.' },
-              { n: 2, t: 'Persetujuan Admin', d: 'Panitia SPMB memverifikasi & menyetujui pendaftaran Anda.' },
-              { n: 3, t: 'Siswa Aktif', d: 'Setelah disetujui, Anda resmi menjadi siswa SMK PGRI 3 Denpasar. Datang ke sekolah untuk daftar ulang fisik.' },
+              {
+                n: 1,
+                t: 'Isi Formulir',
+                d: 'Lengkapi formulir pendaftaran online dengan data diri dan pilihan jurusan yang benar.',
+              },
+              {
+                n: 2,
+                t: 'Cek Status via Email',
+                d: 'Nomor registrasi akan dikirim ke email Anda. Gunakan nomor tersebut untuk memantau status pendaftaran secara berkala di halaman Cek Status.',
+              },
+              {
+                n: 3,
+                t: 'Daftar Ulang ke Sekolah',
+                d: 'Setelah pengumuman diterima muncul di Cek Status, datang langsung ke sekolah untuk melakukan daftar ulang dan pembayaran.',
+              },
             ].map((s, i) => (
               <motion.div
                 key={s.n}

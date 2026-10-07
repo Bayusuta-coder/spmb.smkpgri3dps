@@ -12,14 +12,16 @@ import GelombangPage from './pages/GelombangPage';
 import JurusanPage from './pages/JurusanPage';
 import UsersPage from './pages/UsersPage';
 import RolesPage from './pages/RolesPage';
-import StatistikPage from './pages/StatistikPage';
 import AuditLogPage from './pages/AuditLogPage';
 import BeritaPage from './pages/BeritaPage';
 import PengumumanPage from './pages/PengumumanPage';
 import RekapPendapatanPage from './pages/RekapPendapatanPage';
 import ProfilePage from './pages/ProfilePage';
 import PengaturanLaporanPage from './pages/PengaturanLaporanPage';
+import PengaturanHargaPage from './pages/PengaturanHargaPage';
 import TahunAjaranPage from './pages/TahunAjaranPage';
+import SeragamItemMasterPage from './pages/SeragamItemMasterPage';
+import SeragamChecklistPage from './pages/SeragamChecklistPage';
 
 function PrivateRoute() {
   const { user, loading } = useAuth();
@@ -52,14 +54,16 @@ export default function App() {
         <Route path="/jurusan" element={<JurusanPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/roles" element={<RolesPage />} />
-        <Route path="/statistik" element={<StatistikPage />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/berita" element={<BeritaPage />} />
         <Route path="/pengumuman" element={<PengumumanPage />} />
         <Route path="/rekap-pendapatan" element={<RekapPendapatanPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/pengaturan-laporan" element={<PengaturanLaporanPage />} />
+        <Route path="/pengaturan-harga" element={<PengaturanHargaPage />} />
         <Route path="/tahun-ajaran" element={<TahunAjaranPage />} />
+        <Route path="/seragam-item-master" element={<SeragamItemMasterPage />} />
+        <Route path="/pendaftar/:id/seragam" element={<SeragamChecklistPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

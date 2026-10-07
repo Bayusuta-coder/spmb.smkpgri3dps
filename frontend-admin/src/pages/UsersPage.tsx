@@ -22,6 +22,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import WhatsappVerificationModal from '../components/WhatsappVerificationModal';
 import IconButton from '../components/IconButton';
+import { CustomSelect } from '../components/CustomSelect';
 
 const SUPERADMIN_ROLE_NAME = 'Superadmin';
 
@@ -378,8 +379,8 @@ export default function UsersPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select
-          className="input max-w-xs"
+        <CustomSelect
+          className="max-w-xs"
           value={filterRoleId}
           onChange={(e) => setFilterRoleId(e.target.value)}
         >
@@ -387,16 +388,16 @@ export default function UsersPage() {
           {roles.map((r) => (
             <option key={r.id} value={r.id}>{r.name}</option>
           ))}
-        </select>
-        <select
-          className="input max-w-xs"
+        </CustomSelect>
+        <CustomSelect
+          className="max-w-xs"
           value={filterIsActive}
           onChange={(e) => setFilterIsActive(e.target.value as any)}
         >
           <option value="all">Semua status</option>
           <option value="active">Aktif</option>
           <option value="inactive">Nonaktif</option>
-        </select>
+        </CustomSelect>
         <div className="ml-auto text-xs text-slate-500">
           {loading ? 'Memuat…' : `${items.length} user`}
         </div>

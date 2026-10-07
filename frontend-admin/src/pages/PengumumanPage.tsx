@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus,
   Trash2,
-  History,
   ListChecks,
   Edit3,
   RotateCcw,
@@ -19,9 +18,10 @@ import { toast } from 'sonner';
 import { api, fotoUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import UploadFotoField from '../components/UploadFotoField';
-import HistoryTab from '../components/HistoryTab';
+import { DateTimePicker, isoToLocalInput } from '../components/DateTimePicker';
 
-type Tab = 'list' | 'history';
+// Tab "Riwayat Perubahan" dihapus (F3) — histori Pengumuman (action
+// `pengumuman.*`) bisa dilihat via Audit Log → filter module=Pengumuman.
 
 interface Pengumuman {
   id: string;
@@ -122,7 +122,6 @@ const fmtDate = (iso: string | null) => {
 
 export default function PengumumanPage() {
   const { hasPermission } = useAuth();
-  const [tab, setTab] = useState<Tab>('list');
   const [items, setItems] = useState<Pengumuman[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -167,8 +166,10 @@ export default function PengumumanPage() {
       foto: p.foto,
       aktif: p.aktif,
       urutan: p.urutan,
-      tanggalMulai: p.tanggalMulai ?? '',
-      tanggalSelesai: p.tanggalSelesai ?? '',
+      // Backend return ISO datetime ("2026-01-01T00:00:00.000Z") — normalize
+      // ke "YYYY-MM-DD" untuk date-only input.
+      tanggalMulai: isoToLocalInput(p.tanggalMulai, 'date'),
+      tanggalSelesai: isoToLocalInput(p.tanggalSelesai, 'date'),
       unlimited: !tanggalSelesaiAda && p.aktif,
     });
     setShowForm(true);
@@ -251,41 +252,25 @@ export default function PengumumanPage() {
           <h1 className="text-2xl font-bold text-slate-900">Manajemen Pengumuman</h1>
           <p className="text-sm text-slate-500">Banner popup yang tampil di landing page user.</p>
         </div>
-        {tab === 'list' && hasPermission('pengumuman.manage') && (
+        {hasPermission('pengumuman.manage') && (
           <button onClick={showForm ? () => setShowForm(false) : openCreate} className="btn-primary">
             <Plus size={16} /> {showForm ? 'Tutup' : 'Pengumuman Baru'}
           </button>
         )}
       </div>
 
-      <div className="mb-4 flex gap-1 rounded-lg bg-slate-200 p-1">
-        <button
-          onClick={() => setTab('list')}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
-            tab === 'list' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <ListChecks size={16} /> Daftar Pengumuman
-        </button>
-        <button
-          onClick={() => setTab('history')}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
-            tab === 'history' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <History size={16} /> Riwayat
-        </button>
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold text-slate-700">Daftar Pengumuman</h2>
       </div>
 
       <AnimatePresence mode="wait">
-        {tab === 'list' ? (
-          <motion.div
-            key="list"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
-          >
+        <motion.div
+          key="list"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
+        >
             {showForm && hasPermission('pengumuman.manage') && (
               <motion.form
                 initial={{ y: -8, opacity: 0 }}
@@ -335,11 +320,11 @@ export default function PengumumanPage() {
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <div>
                       <label className="label">Tanggal Mulai Tayang</label>
-                      <input
-                        type="date"
-                        className="input"
+                      <DateTimePicker
                         value={form.tanggalMulai}
-                        onChange={(e) => setForm({ ...form, tanggalMulai: e.target.value })}
+                        onChange={(v) => setForm({ ...form, tanggalMulai: v })}
+                        mode="date"
+                        showIcon={false}
                       />
                       <p className="mt-1 text-[11px] text-slate-500">
                         Kosongkan = langsung tayang saat disimpan.
@@ -347,11 +332,11 @@ export default function PengumumanPage() {
                     </div>
                     <div>
                       <label className="label">Tanggal Selesai Tayang</label>
-                      <input
-                        type="date"
-                        className="input"
+                      <DateTimePicker
                         value={form.tanggalSelesai}
-                        onChange={(e) => setForm({ ...form, tanggalSelesai: e.target.value })}
+                        onChange={(v) => setForm({ ...form, tanggalSelesai: v })}
+                        mode="date"
+                        showIcon={false}
                         disabled={form.unlimited}
                         min={form.tanggalMulai || undefined}
                       />
@@ -547,10 +532,7 @@ export default function PengumumanPage() {
                 </table>
               </div>
             </div>
-          </motion.div>
-        ) : (
-          <HistoryTab key="history" module="pengumuman" title="Riwayat Perubahan Pengumuman" />
-        )}
+        </motion.div>
       </AnimatePresence>
     </div>
   );

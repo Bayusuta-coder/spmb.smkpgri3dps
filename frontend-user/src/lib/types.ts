@@ -1,19 +1,22 @@
 export type StatusPendaftar =
   | 'MENUNGGU_PERSETUJUAN'
+  | 'MENUNGGU_UKURAN_BAJU' // siswa sudah bayar (Bukti Pembayaran tersedia), tinggal TU catat baju saat daftar ulang
   | 'DITOLAK'
   | 'SISWA_AKTIF';
 
 // Label publik untuk orang tua murid — friendly, hindari istilah teknis.
 // Backend mengirim status internal (MENUNGGU_PERSETUJUAN), frontend mapping
-// ke label yang lebih mudah dipahami ("Menunggu Daftar Ulang").
+// ke label yang lebih mudah dipahami.
 export const STATUS_LABELS: Record<StatusPendaftar, string> = {
-  MENUNGGU_PERSETUJUAN: 'Menunggu Daftar Ulang',
+  MENUNGGU_PERSETUJUAN: 'Belum Daftar Ulang',
+  MENUNGGU_UKURAN_BAJU: 'Sudah Bayar',
   DITOLAK: 'Ditolak',
   SISWA_AKTIF: 'Siswa Aktif',
 };
 
 export const STATUS_COLORS: Record<StatusPendaftar, string> = {
   MENUNGGU_PERSETUJUAN: 'bg-amber-100 text-amber-800 border border-amber-200',
+  MENUNGGU_UKURAN_BAJU: 'bg-blue-100 text-blue-800 border border-blue-200',
   DITOLAK: 'bg-red-100 text-red-800 border border-red-200',
   SISWA_AKTIF: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
 };

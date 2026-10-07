@@ -40,6 +40,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { CurrentUser, JwtUserPayload } from '../common/decorators/current-user.decorator';
+import { ApiBearerAuth, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { WhatsappService } from './whatsapp.service';
 import { WhatsappOtpService } from './whatsapp-otp.service';
 import { normalizePhoneNumber } from './whatsapp.util';
@@ -65,6 +66,7 @@ interface AuthenticatedRequest extends Request {
  * Server akan normalize ke E.164 `62xxxxxxxxxx` lewat normalizePhoneNumber().
  */
 class RequestOtpDto {
+  @ApiProperty({ type: String, maxLength: 32, description: 'Nomor WhatsApp tujuan OTP (format 08xxx atau +62xxx)' })
   @IsString({ message: 'phoneNumber harus berupa string' })
   @IsNotEmpty({ message: 'phoneNumber tidak boleh kosong' })
   @MaxLength(32, { message: 'phoneNumber terlalu panjang' })
@@ -79,6 +81,7 @@ class RequestOtpDto {
  * DTO untuk POST /whatsapp/verify-otp — kode 6 digit numeric.
  */
 class VerifyOtpDto {
+  @ApiProperty({ type: String, minLength: 6, maxLength: 6, description: 'Kode OTP 6 digit angka yang diterima via WhatsApp' })
   @IsString({ message: 'code harus berupa string' })
   @IsNotEmpty({ message: 'code tidak boleh kosong' })
   @Length(6, 6, { message: 'code harus tepat 6 digit' })
@@ -92,6 +95,7 @@ class VerifyOtpDto {
  * dengan field di User model — biar mapping 1:1 dengan database column.
  */
 class UpdateMyNumberDto {
+  @ApiProperty({ type: String, maxLength: 32, description: 'Nomor WhatsApp baru user (format 08xxx atau +62xxx)' })
   @IsString({ message: 'whatsappNumber harus berupa string' })
   @IsNotEmpty({ message: 'whatsappNumber tidak boleh kosong' })
   @MaxLength(32)
@@ -105,6 +109,7 @@ class UpdateMyNumberDto {
  * DTO untuk PUT /whatsapp/admin/users/:userId/number (admin update user lain).
  */
 class UpdateUserNumberDto {
+  @ApiProperty({ type: String, maxLength: 32, description: 'Nomor WhatsApp baru untuk user target (format 08xxx atau +62xxx)' })
   @IsString({ message: 'whatsappNumber harus berupa string' })
   @IsNotEmpty({ message: 'whatsappNumber tidak boleh kosong' })
   @MaxLength(32)
@@ -120,11 +125,13 @@ class UpdateUserNumberDto {
  * cukup validasi base shape supaya tidak ada 500 dari key random.
  */
 class UpdateSettingDto {
+  @ApiProperty({ type: String, maxLength: 128, description: 'Key setting laporan yang akan di-update (whitelist di service)' })
   @IsString({ message: 'key harus berupa string' })
   @IsNotEmpty({ message: 'key tidak boleh kosong' })
   @MaxLength(128)
   key!: string;
 
+  @ApiProperty({ type: String, description: 'Nilai baru setting (format string; parsing dilakukan service per-key)' })
   @IsString({ message: 'value harus berupa string' })
   value!: string;
 }
@@ -140,6 +147,8 @@ export {
   UpdateSettingDto,
 };
 
+@ApiTags('WhatsApp')
+@ApiBearerAuth('bearer')
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class WhatsappController {

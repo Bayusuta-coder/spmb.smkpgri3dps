@@ -7,15 +7,12 @@ import {
   Save,
   Shield,
   Undo2,
-  History,
   Lock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import ToggleSwitch from '../components/ToggleSwitch';
-import LogEntryCard from '../components/LogEntryCard';
-import { formatLogDetail } from '../lib/logFormatter';
 import {
   PERMISSION_UI_LABELS,
   PERMISSION_SECTION_ORDER,
@@ -57,24 +54,12 @@ interface Role {
   isSystem: boolean;
   userCount: number;
   permissions: Permission[];
+  // F5: explicit true/false matrix untuk semua permission code
+  permissionCodes?: string[];
+  permissionMatrix?: Record<string, boolean>;
 }
 
-interface RoleAuditEntry {
-  id: string;
-  action: string;
-  module?: string;
-  entityId: string;
-  createdAt: string;
-  ipAddress: string | null;
-  user: { id: string; name: string; email: string } | null;
-  meta: {
-    roleName?: string;
-    addedPermissionCodes?: string[];
-    removedPermissionCodes?: string[];
-    before?: { permissionCodes: string[] };
-    after?: { permissionCodes: string[] };
-  } | null;
-}
+// RoleAuditEntry dihapus (F6) — histori role ditampilkan via Audit Log global.
 
 export default function RolesPage() {
   const { hasPermission, hasAnyRole } = useAuth();
@@ -100,10 +85,7 @@ export default function RolesPage() {
     return open;
   });
 
-  // History panel state (Fix #2)
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<RoleAuditEntry[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  // History panel state dihapus (F6) — lihat Audit Log → filter module=role
 
   // Create-role form state
   const [createForm, setCreateForm] = useState({
@@ -136,29 +118,15 @@ export default function RolesPage() {
     }
   };
 
-  // Load permission-change history (Fix #2)
-  const loadHistory = async () => {
-    setHistoryLoading(true);
-    try {
-      const r = await api.get<{ items: RoleAuditEntry[]; total: number }>(
-        '/audit-logs?module=role&pageSize=50',
-      );
-      // Filter hanya entry permission change (skip role.created/role.deleted
-      // yang bukan toggle action). Tetap tampilkan semuanya supaya admin
-      // bisa lihat role baru & role dihapus juga.
-      setHistory(r.data.items);
-    } catch (e: any) {
-      toast.error('Gagal memuat log perubahan: ' + e.message);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
+  // F6: loadHistory() dihapus — histori permission dilihat via Audit Log.
 
   useEffect(() => {
     load();
   }, []);
 
-  // Group permissions by section (untuk render matrix per-section)
+  // loadHistory() dihapus (F6) — histori dilihat via Audit Log.
+  // Permission `loadHistory`/`setHistoryOpen` references sudah dihapus
+  // dari handler Save (handleSave tidak lagi auto-reload history panel).
   const groupedBySection = useMemo(() => {
     const groups: Record<string, Array<Permission & { meta?: PermissionMeta }>> = {};
     PERMISSION_SECTION_ORDER.forEach((s) => {
@@ -250,8 +218,6 @@ export default function RolesPage() {
       if (failed.length === 0) {
         toast.success(`${updates.length} role berhasil diperbarui`);
         await load();
-        // Refresh history kalau panel lagi dibuka
-        if (historyOpen) loadHistory();
       } else {
         const failedNames = updates
           .filter((_, i) => results[i].status === 'rejected')
@@ -509,63 +475,10 @@ export default function RolesPage() {
         </div>
       )}
 
-      {/* ─── History Panel (Fix #2) ───────────────────────────────────── */}
-      <div className="mt-6 card p-0">
-        <button
-          type="button"
-          onClick={() => {
-            const next = !historyOpen;
-            setHistoryOpen(next);
-            if (next && history.length === 0) loadHistory();
-          }}
-          className="flex w-full items-center justify-between gap-2 p-4 text-left transition hover:bg-slate-50"
-        >
-          <div className="flex items-center gap-2">
-            <History size={16} className="text-slate-600" />
-            <h3 className="text-sm font-semibold text-slate-900">Log Perubahan Role &amp; Permission</h3>
-            {history.length > 0 && (
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                {history.length} entri
-              </span>
-            )}
-          </div>
-          {historyOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </button>
-        {historyOpen && (
-          <div className="border-t border-slate-200 p-4">
-            {historyLoading ? (
-              <div className="text-sm text-slate-500">Memuat log…</div>
-            ) : history.length === 0 ? (
-              <div className="text-sm text-slate-500">
-                Belum ada perubahan permission. Log akan muncul di sini otomatis setiap
-                ada role yang disimpan.
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {history.map((h) => {
-                  const role = roles.find((r) => r.id === h.entityId);
-                  const roleName = h.meta?.roleName || role?.name || h.entityId;
-                  return (
-                    <LogEntryCard
-                      key={h.id}
-                      createdAt={h.createdAt}
-                      action={h.action}
-                      user={h.user}
-                      ipAddress={h.ipAddress}
-                      entityName={roleName}
-                      rows={formatLogDetail(
-                        h.action,
-                        h.module || 'role',
-                        h.meta,
-                      )}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* F6 — Log perubahan role/permission dihapus dari halaman ini.
+          Histori tersedia di Audit Log → filter module="Role & Permission"
+          (lihat AuditLogPage). Backend masih mencatat audit log seperti biasa
+          (action `role.permissions_updated`, dll). */}
     </div>
   );
 }

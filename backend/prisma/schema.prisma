@@ -52,6 +52,11 @@ model User {
   beritaDibuat         Berita[]      @relation("BeritaCreatedBy")
   pengumumanDibuat     Pengumuman[]  @relation("PengumumanCreatedBy")
   settingsUpdated      Setting[]     @relation("SettingUpdatedBy")
+  // Checklist seragam: petugasId di-set ke user TU/Superadmin yang terakhir edit
+  // form. Karena 1 checklist bisa diedit berkali-kali (form parsial, siswa
+  // bisa ambil seragam bertahap), field ini SELALU di-overwrite ke user yang
+  // terakhir menyimpan — lihat `submitChecklistSeragam()` di SeragamService.
+  checklistSeragamDiinput SeragamChecklist[] @relation("SeragamPetugas")
 
   @@index([resetTokenHash])
   @@index([whatsappNumber])
@@ -334,6 +339,11 @@ model Pendaftar {
   dibayarOleh            User?     @relation("PendaftarPaymentRecordedBy", fields: [dibayarOlehUserId], references: [id], onDelete: SetNull)
   ukuranBajuDisetOleh    User?     @relation("PendaftarUkuranBajuSetBy", fields: [ukuranBajuDisetOlehUserId], references: [id], onDelete: SetNull)
   user                   User?     @relation("PendaftarUser", fields: [userId], references: [id])
+  // Checklist seragam 1-to-1 — Nullable: pendaftar yang belum pernah diproses
+  // TU belum punya checklist. onDelete Cascade supaya kalau pendaftar dihapus
+  // (hard delete), checklist ikut hilang (ceklist item sudah ter-foreign-key
+  // ke checklist, otomatis hilang via cascade chain di item).
+  seragamChecklist      SeragamChecklist?
 
   @@index([status])
   @@index([jurusanId])
@@ -403,6 +413,14 @@ model Berita {
   hashtag     String[] // Postgres text[] — list hashtag
   status      StatusBerita @default(DRAFT)
   publishedAt DateTime? // di-set saat pertama publish, untuk sort publik yang stabil
+  // Jadwal tayang otomatis (nullable). Endpoint publik filter berdasarkan
+  // kolom ini supaya berita otomatis muncul/hilang sesuai jadwal tanpa admin
+  // harus ubah status manual:
+  //   - tayang_dari    null → boleh tayang kapan saja (tidak ada batas awal)
+  //   - tayang_sampai  null → tidak ada batas akhir (tayang terus)
+  // publishedAt tetap dipakai untuk sort & jejak "pertama kali publish".
+  tayangDari     DateTime? // start window — berita mulai tampil sejak waktu ini
+  tayangSampai   DateTime? // end window — berita berhenti tampil sejak waktu ini
 
   createdByUserId String?
   // Snapshot nama & email author — readable walau user dihapus.
@@ -415,6 +433,7 @@ model Berita {
 
   @@index([status, publishedAt])
   @@index([deletedAt])
+  @@index([status, tayangDari, tayangSampai])
   @@map("berita")
 }
 
@@ -508,4 +527,105 @@ model WhatsAppSetting {
   createdAt   DateTime @default(now())
 
   @@map("whatsapp_settings")
+}
+
+// ============================================================================
+// SERAGAM - MASTER ITEM + CHECKLIST PENGAMBILAN SERAGAM SISWA BARU
+// ============================================================================
+//
+// Alur Batch D: dari form "Input Ukuran Baju" (dropdown tunggal) menjadi
+// formulir checklist seragam lengkap yang meniru form fisik sekolah.
+//
+// Hirarki:
+//   SeragamItemMaster (1) ──< (N) SeragamChecklistItem >── (1) SeragamChecklist
+//   SeragamChecklist (1) ── (1) Pendaftar (1-to-1)
+//
+// Lifecycle:
+//   1. Superadmin kelola SeragamItemMaster (nama + urutan + isActive).
+//   2. TU buka form checklist untuk seorang siswa.
+//   3. Pertama kali submit: auto-generate SeragamChecklistItem untuk SEMUA
+//      item master yang aktif saat itu (sudahDidapat=false default).
+//   4. Submit ulang (parsial update): existing items di-update by checklistId
+//      + itemMasterId, item master baru yang diaktifkan belakangan akan ter-
+//      generate di submit selanjutnya (logic: upsert checklist + sync items
+//      dari master aktif).
+//   5. TU cetak PDF Formulir Pengambilan Seragam via PdfService.
+//   6. Status kelengkapan baju (yang menggerakkan flip ke SISWA_AKTIF) tetap
+//      dibaca dari `Pendaftar.ukuranBaju` — jadi service SELALU sync
+//      pendaftar.ukuranBaju saat checklist disimpan.
+//
+// Item yang sudah pernah dipakai di checklist TIDAK boleh hard delete (lihat
+// SeragamItemMaster.controller.delete()) — nonaktifkan via isActive=false saja
+// supaya data historis tetap utuh dan PDF lama tidak menjadi orphan reference.
+
+/// Master item seragam. Diatur oleh Superadmin via halaman /seragam-item-master.
+model SeragamItemMaster {
+  id        String   @id @default(cuid())
+  nama      String // misal "Baju Putih Lengan Pendek", "Celana Biru Tua"
+  // Urutan tampilan (angka kecil = lebih dulu). Re-order via input angka di
+  // UI atau drag-and-drop. Pakai angka (bukan fractional indexing) karena N
+  // item kecil dan edit manual cukup.
+  urutan    Int      @default(0)
+  // Soft-delete: kalau sudah pernah dipakai di checklist siswa manapun,
+  // service TOLAK hard delete dan suruh nonaktifkan via isActive=false.
+  // Ini supaya histori PDF lama tetap konsisten (tidak ada orphan ref).
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  checklistItems SeragamChecklistItem[]
+
+  @@index([isActive, urutan])
+  @@map("seragam_item_master")
+}
+
+/// 1 checklist per siswa (satu siswa bisa ambil seragam bertahap — form
+/// bisa di-edit berkali-kali, status kelengkapan baju hanya flip saat
+/// pertama kali submit).
+model SeragamChecklist {
+  id          String   @id @default(cuid())
+  pendaftarId String   @unique
+  // Ukuran baju yang dipakai siswa (S/M/L/XL/XXL/XXXL atau string lain
+  // yang divalidasi Setting.ukuran_baju_options).
+  ukuran     String
+  tanggalPengambilan DateTime // default hari ini saat submit
+  // Nama penerima (orang tua/wali yang tanda tangan di kolom "Penerima").
+  // Opsional: TU bisa update belakangan kalau siswa datang tanpa ortu.
+  penerimaNama String?
+  // ID user TU/Superadmin yang terakhir submit checklist ini. Karena
+  // editable multiple times, field ini di-overwrite setiap submit.
+  petugasId   String?
+  // Snapshot nama & email petugas — readable walau user sudah dihapus.
+  petugasNama String?
+  petugasEmail String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  pendaftar   Pendaftar              @relation(fields: [pendaftarId], references: [id], onDelete: Cascade)
+  petugas     User?                  @relation("SeragamPetugas", fields: [petugasId], references: [id], onDelete: SetNull)
+  items       SeragamChecklistItem[]
+
+  @@map("seragam_checklist")
+}
+
+/// 1 row per (checklist × item master). Item master yang di-deactivate
+/// setelah dipakai di checklist TETAP disimpan di sini (lihat onDelete
+/// Restrict di FK itemMaster — service hard-delete master akan ditolak).
+model SeragamChecklistItem {
+  id            String  @id @default(cuid())
+  checklistId   String
+  itemMasterId  String
+  sudahDidapat  Boolean @default(false)
+  // Keterangan tambahan per item (mis. "diambil oleh ayah", "tanggal 5/9").
+  // Nullable — boleh kosong kalau tidak ada catatan.
+  keterangan    String?
+
+  checklist  SeragamChecklist  @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  itemMaster SeragamItemMaster @relation(fields: [itemMasterId], references: [id], onDelete: Restrict)
+
+  // 1 siswa × 1 item master cuma boleh 1 row. Update sudahDidapat/keterangan
+  // lewat upsert by (checklistId, itemMasterId) bukan row baru.
+  @@unique([checklistId, itemMasterId])
+  @@index([itemMasterId])
+  @@map("seragam_checklist_item")
 }

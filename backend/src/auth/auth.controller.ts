@@ -4,11 +4,14 @@ import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser, JwtUserPayload } from '../common/decorators/current-user.decorator';
+import { ApiBearerAuth, ApiProperty, ApiTags } from '@nestjs/swagger';
 
 class LoginDto {
+  @ApiProperty({ type: String, description: 'Email akun pengguna yang akan login' })
   @IsEmail({}, { message: 'Email tidak valid' })
   email!: string;
 
+  @ApiProperty({ type: String, minLength: 6, description: 'Password akun pengguna (minimal 6 karakter)' })
   @IsString()
   @IsNotEmpty({ message: 'Password wajib diisi' })
   @MinLength(6, { message: 'Password minimal 6 karakter' })
@@ -16,15 +19,18 @@ class LoginDto {
 }
 
 class ForgotPasswordDto {
+  @ApiProperty({ type: String, description: 'Email akun yang ingin di-reset passwordnya' })
   @IsEmail({}, { message: 'Email tidak valid' })
   email!: string;
 }
 
 class ResetPasswordDto {
+  @ApiProperty({ type: String, description: 'Token reset password yang diterima via email' })
   @IsString()
   @IsNotEmpty({ message: 'Token wajib diisi' })
   token!: string;
 
+  @ApiProperty({ type: String, minLength: 6, description: 'Password baru untuk akun (minimal 6 karakter)' })
   @IsString()
   @IsNotEmpty({ message: 'Password baru wajib diisi' })
   @MinLength(6, { message: 'Password baru minimal 6 karakter' })
@@ -45,6 +51,8 @@ function reqMeta(req: Request) {
   return { ipAddress: ip, userAgent: ua };
 }
 
+@ApiTags('auth')
+@ApiBearerAuth('bearer')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}

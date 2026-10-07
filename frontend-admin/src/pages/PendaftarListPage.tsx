@@ -10,6 +10,7 @@ import {
   Download,
   RefreshCw,
   AlertTriangle,
+  CheckCircle2,
   FileSpreadsheet,
   Shirt,
   Wallet,
@@ -22,13 +23,13 @@ import { useAuth } from '../context/AuthContext';
 import {
   STATUS_COLORS,
   STATUS_LABELS,
-  UKURAN_BAJU_OPTIONS,
   METODE_PEMBAYARAN_LABELS,
   KELENGKAPAN_COLORS,
   formatRupiah,
 } from '../lib/constants';
 import { toast } from 'sonner';
 import ExportDaftarUlangModal from '../components/ExportDaftarUlangModal';
+import { CustomSelect } from '../components/CustomSelect';
 
 /**
  * Status pendaftar sekarang AUTO-COMPUTED di backend dari kombinasi
@@ -67,6 +68,14 @@ interface PendaftarRow {
   ukuranBaju?: string | null;
   tanggalUkuranBaju?: string | null;
   ukuranBajuDisetOleh?: { name: string; email: string } | null;
+  // Batch D: badge kelengkapan item seragam (compact). null = checklist
+  // belum pernah dibuat (lihat backend pendafar.service.listForAdmin).
+  seragamKelengkapan?: {
+    totalItems: number;
+    sudahDidapat: number;
+    belumDidapat: number;
+    isLengkap: boolean;
+  } | null;
   createdAt: string;
 }
 
@@ -75,12 +84,20 @@ export default function PendaftarListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<PendaftarRow[]>([]);
   const [total, setTotal] = useState(0);
+  // totalPages di-supply dari backend — kalau backend belum kirim (mis.
+  // response cache lama), fallback ke compute lokal dari `total/pageSize`.
+  const [totalPages, setTotalPages] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [status, setStatus] = useState(searchParams.get('status') || '');
   const [gelombangId, setGelombangId] = useState(searchParams.get('gelombangId') || '');
+  const [jurusanId, setJurusanId] = useState(searchParams.get('jurusanId') || '');
   const [gelombangName, setGelombangName] = useState('');
+  // F4 — display label untuk filter chip "Jurusan". Di-fetch sekali saat mount
+  // dari endpoint /jurusan (ringan, hanya daftar master). Kalau gagal, fallback
+  // ke ID mentah supaya chip tetap informatif.
+  const [jurusanName, setJurusanName] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -92,28 +109,31 @@ export default function PendaftarListPage() {
     submitting: boolean;
   }>({ open: false, target: null, note: '', submitting: false });
 
-  // Batch C: Modal Pembayaran (Bendahara) — pilih CASH/TRANSFER
+  // Batch C: Modal Pembayaran (Bendahara) — pilih CASH/TRANSFER.
+  //
+  // Modal ini fetch harga dari GET /settings/harga-daftar-ulang saat dibuka
+  // supaya user langsung lihat angka AKTUAL (bukan placeholder statis).
+  // Backend yang handle snapshot — frontend cukup display saja.
   const [bayarModal, setBayarModal] = useState<{
     open: boolean;
     target: PendaftarRow | null;
     metode: 'CASH' | 'TRANSFER';
-    nominalSnapshot: number | null;
+    /** Snapshot harga dari Settings.harga_daftar_ulang. Sumber display. */
+    hargaDefault: number;
+    /** Sudah selesai fetch settings? false = masih loading. */
+    hargaLoaded: boolean;
     submitting: boolean;
   }>({
     open: false,
     target: null,
     metode: 'CASH',
-    nominalSnapshot: null,
+    hargaDefault: 0,
+    hargaLoaded: false,
     submitting: false,
   });
 
-  // Batch C: Modal Ukuran Baju (TU) — pilih XS..XXXL
-  const [ukuranModal, setUkuranModal] = useState<{
-    open: boolean;
-    target: PendaftarRow | null;
-    ukuranBaju: string;
-    submitting: boolean;
-  }>({ open: false, target: null, ukuranBaju: 'M', submitting: false });
+  // Batch C: Modal Ukuran Baju (TU) — sudah dihapus Batch D.
+  // Sekarang input ukuran baju via halaman /pendaftar/:id/seragam (link dari icon 👕).
 
   // Modal export Excel
   const [exportOpen, setExportOpen] = useState(false);
@@ -151,7 +171,11 @@ export default function PendaftarListPage() {
 
   const canReject = hasPermission('spmb.reject');
   const canBayar = hasPermission('spmb.bayar');
-  const canUkuranBaju = hasPermission('spmb.ukuran_baju');
+  // Batch D: pindah ke form Checklist Seragam. Tetap fallback ke permission
+  // lama supaya TU lama yang belum di-update rolenya tidak kehilangan akses.
+  const canUkuranBaju =
+    hasPermission('spmb.checklist_seragam.manage') ||
+    hasPermission('spmb.ukuran_baju');
   const canCreate = hasPermission('spmb.create');
 
   useEffect(() => {
@@ -168,6 +192,23 @@ export default function PendaftarListPage() {
       .catch(() => setGelombangName(gelombangId));
   }, [gelombangId]);
 
+  // F4 — fetch label Jurusan untuk chip. Dipakai saat user pilih Jurusan
+  // lewat filter dropdown atau deep link dengan ?jurusanId=...
+  useEffect(() => {
+    if (!jurusanId) {
+      setJurusanName('');
+      return;
+    }
+    api
+      .get('/jurusan', { params: { includeDeleted: true } })
+      .then((r) => {
+        const data = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
+        const j = data.find((x: any) => x.id === jurusanId);
+        setJurusanName(j ? `${j.code} — ${j.name}` : jurusanId);
+      })
+      .catch(() => setJurusanName(jurusanId));
+  }, [jurusanId]);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -178,10 +219,15 @@ export default function PendaftarListPage() {
           search: search || undefined,
           status: status || undefined,
           gelombangId: gelombangId || undefined,
+          jurusanId: jurusanId || undefined,
         },
       });
       setItems(res.data.items);
       setTotal(res.data.total);
+      // totalPages di-compute di backend sekali jalan — FE tinggal pakai
+      // (lebih konsisten kalau backend nanti override mis. max 50/halaman,
+      // FE otomatis ikut tanpa duplikat Math.ceil di sini).
+      setTotalPages(res.data.totalPages ?? Math.max(1, Math.ceil((res.data.total ?? 0) / pageSize)));
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -189,15 +235,21 @@ export default function PendaftarListPage() {
     }
   };
 
+  // Re-fetch setiap page ATAU filter berubah — supaya satu event flow
+  // konsisten (search, status, gelombang, jurusan) semua trigger ulang
+  // backend dengan page=1. Backup eksplisit `load()` di handler lain
+  // sudah dihilangkan supaya tidak ada double-fetch.
   useEffect(() => {
+    // Setiap filter berubah → reset ke page 1 (kalau page > 1 redundant).
+    setPage((p) => (p === 1 ? p : 1));
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [page, search, status, gelombangId, jurusanId]);
 
   const onSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
-    load();
+    // useEffect di atas akan handle re-fetch ketika search state berubah;
+    // di sini cukup submit form saja. page akan auto-reset ke 1.
   };
 
   const clearFilter = (key: string) => {
@@ -207,35 +259,59 @@ export default function PendaftarListPage() {
     if (key === 'gelombangId') setGelombangId('');
     if (key === 'status') setStatus('');
     if (key === 'search') setSearch('');
-    setPage(1);
-    setTimeout(load, 0);
+    if (key === 'jurusanId') setJurusanId('');
+    // useEffect akan fetch otomatis karena state di-reset.
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // totalPages di-supply dari backend via setTotalPages() di load().
+  // Selalu >= 1 supaya kontrol prev/next tidak dalam state 'no pages'.
+  const totalPagesFinal = totalPages > 0 ? totalPages : Math.max(1, Math.ceil(total / pageSize));
 
   // -- Inline actions -------------------------------------------------------
 
-  // Batch C: 2 modal handlers terpisah untuk Bendahara & TU
-  const openBayarModal = (p: PendaftarRow) => {
-    // Nominal snapshot otomatis di backend dari Settings.harga_daftar_ulang
-    // saat submit. Kalau pendaftar sudah pernah LUNAS (re-edit), tampilkan
-    // nilai existing sebagai referensi. Kalau belum, null (= akan ke-snapshot
-    // saat submit dari setting global).
-    const nominalSnapshot =
-      p.nominalPembayaran != null ? Number(p.nominalPembayaran) : null;
+  // Batch C: Buka modal Catat Pembayaran. Fetch harga dari settings supaya
+  // user langsung lihat angka nominal AKTUAL (bukan placeholder statis).
+  // Backend yang handle snapshot dari settings — frontend cuma display saja.
+  const openBayarModal = async (p: PendaftarRow) => {
+    const metode = (p.metodePembayaran as 'CASH' | 'TRANSFER') || 'CASH';
+
+    // Step 1: buka modal dengan loading state
     setBayarModal({
       open: true,
       target: p,
-      metode: (p.metodePembayaran as 'CASH' | 'TRANSFER') || 'CASH',
-      nominalSnapshot,
+      metode,
+      hargaDefault: 0,
+      hargaLoaded: false,
       submitting: false,
     });
+
+    // Step 2: fetch harga default dari settings
+    try {
+      console.log('[CatatPembayaran] Fetch GET /settings/harga-daftar-ulang…');
+      const res = await api.get<{ value: number; updatedAt: string | null }>(
+        '/settings/harga-daftar-ulang',
+      );
+      const v = Number(res.data?.value ?? 0);
+      console.log('[CatatPembayaran] Harga default dari settings:', v, '→ snapshot:', v);
+      setBayarModal((m) => ({
+        ...m,
+        hargaDefault: v,
+        hargaLoaded: true,
+      }));
+    } catch (err: any) {
+      console.error('[CatatPembayaran] Gagal fetch harga settings:', err);
+      // Tetap buka modal — hargaLoaded=true dengan hargaDefault=0 supaya
+      // warning "harga belum diatur" muncul, dan tombol submit disabled.
+      setBayarModal((m) => ({ ...m, hargaLoaded: true }));
+    }
   };
 
   const submitBayar = async () => {
     if (!bayarModal.target) return;
     setBayarModal((m) => ({ ...m, submitting: true }));
     try {
+      // Backend snapshot nominal otomatis dari Settings.harga_daftar_ulang.
+      // Frontend cuma kirim metode — harga global dipakai langsung.
       const res = await api.post<{
         status: StatusPendaftar;
         statusLabel: string;
@@ -253,7 +329,8 @@ export default function PendaftarListPage() {
         open: false,
         target: null,
         metode: 'CASH',
-        nominalSnapshot: null,
+        hargaDefault: 0,
+        hargaLoaded: false,
         submitting: false,
       });
       await load();
@@ -263,44 +340,8 @@ export default function PendaftarListPage() {
     }
   };
 
-  const openUkuranModal = (p: PendaftarRow) => {
-    // Default ukuran = existing value kalau pernah di-set (re-edit), else M
-    setUkuranModal({
-      open: true,
-      target: p,
-      ukuranBaju: p.ukuranBaju || 'M',
-      submitting: false,
-    });
-  };
-
-  const submitUkuran = async () => {
-    if (!ukuranModal.target) return;
-    if (!ukuranModal.ukuranBaju) {
-      toast.error('Ukuran baju wajib dipilih');
-      return;
-    }
-    setUkuranModal((m) => ({ ...m, submitting: true }));
-    try {
-      const res = await api.post<{
-        status: StatusPendaftar;
-        statusLabel: string;
-        pdfGenerated: boolean;
-      }>(`/pendaftar/${ukuranModal.target.id}/ukuran-baju`, {
-        ukuranBaju: ukuranModal.ukuranBaju,
-      });
-      const next = res.data;
-      const pesan =
-        next.pdfGenerated
-          ? `${ukuranModal.target.namaLengkap} ukuran ${ukuranModal.ukuranBaju} — status: ${next.statusLabel}. PDF + email terkirim.`
-          : `${ukuranModal.target.namaLengkap} ukuran ${ukuranModal.ukuranBaju}. Status: ${next.statusLabel}.`;
-      toast.success(pesan);
-      setUkuranModal({ open: false, target: null, ukuranBaju: 'M', submitting: false });
-      await load();
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message || e.message);
-      setUkuranModal((m) => ({ ...m, submitting: false }));
-    }
-  };
+  // Batch D: openUkuranModal + submitUkuran sudah dihapus — link langsung ke
+  // /pendaftar/:id/seragam dari icon 👕.
 
   const openRejectModal = (p: PendaftarRow) => {
     setRejectModal({ open: true, target: p, note: '', submitting: false });
@@ -545,8 +586,9 @@ export default function PendaftarListPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <select
-          className="input sm:w-56"
+        <CustomSelect
+          containerClassName="sm:w-56"
+          className="sm:w-56"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
         >
@@ -554,11 +596,25 @@ export default function PendaftarListPage() {
           {Object.entries(STATUS_LABELS).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
           ))}
-        </select>
+        </CustomSelect>
+        {/* F4 — Filter Jurusan. State jurusanId SUDAH ada (line 94) dan
+            sudah diteruskan ke backend; yang kurang adalah <select> UI
+            supaya user bisa pilih dari filter bar (dan chip aktif muncul). */}
+        <CustomSelect
+          containerClassName="sm:w-56"
+          className="sm:w-56"
+          value={jurusanId}
+          onChange={(e) => setJurusanId(e.target.value)}
+        >
+          <option value="">Semua Jurusan</option>
+          {jurusanList.map((j) => (
+            <option key={j.id} value={j.id}>{j.code} — {j.name}</option>
+          ))}
+        </CustomSelect>
         <button type="submit" className="btn-primary">Cari</button>
       </form>
 
-      {(status || gelombangId || search) && (
+      {(status || gelombangId || search || jurusanId) && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-slate-500">Filter aktif:</span>
           {status && (
@@ -576,6 +632,15 @@ export default function PendaftarListPage() {
               className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-800 hover:bg-blue-200"
             >
               Gelombang: {gelombangName || gelombangId}
+              <X size={12} />
+            </button>
+          )}
+          {jurusanId && (
+            <button
+              onClick={() => clearFilter('jurusanId')}
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-200"
+            >
+              Jurusan: {jurusanName || jurusanId}
               <X size={12} />
             </button>
           )}
@@ -662,6 +727,37 @@ export default function PendaftarListPage() {
                           <Shirt size={11} />
                           {p.ukuranBaju ? `Ukuran ${p.ukuranBaju}` : 'Belum'}
                         </span>
+                        {/* Badge kelengkapan item seragam (compact) — hanya
+                            muncul kalau checklist pernah dibuat.
+                            - isLengkap        → hijau ✓
+                            - masih ada yang false → amber ⚠ (X/Y)
+                            - belum ada checklist → tidak dirender (badge
+                              "Belum" ukuran baju di atas sudah cukup). */}
+                        {p.seragamKelengkapan && (
+                          <span
+                            className={`inline-flex w-fit items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold ${
+                              p.seragamKelengkapan.isLengkap
+                                ? KELENGKAPAN_COLORS.done
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                            title={
+                              p.seragamKelengkapan.isLengkap
+                                ? `Semua ${p.seragamKelengkapan.totalItems} item sudah dicentang`
+                                : `${p.seragamKelengkapan.sudahDidapat} dari ${p.seragamKelengkapan.totalItems} item sudah di-centang (${p.seragamKelengkapan.belumDidapat} belum)`
+                            }
+                          >
+                            {p.seragamKelengkapan.isLengkap ? (
+                              <>
+                                <CheckCircle2 size={11} /> Item lengkap
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle size={11} />{' '}
+                                {p.seragamKelengkapan.belumDidapat}/{p.seragamKelengkapan.totalItems} belum
+                              </>
+                            )}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="table-td text-xs text-slate-500">
@@ -687,15 +783,18 @@ export default function PendaftarListPage() {
                             <Wallet size={18} />
                           </button>
                         )}
-                        {canUkuranBaju && !p.ukuranBaju && p.status !== 'DITOLAK' && (
-                          <button
-                            onClick={() => openUkuranModal(p)}
-                            disabled={busyId === p.id}
-                            className="rounded p-1.5 text-indigo-600 transition hover:bg-indigo-50 disabled:opacity-50"
-                            title="Input ukuran baju (TU)"
+                        {canUkuranBaju && p.status !== 'DITOLAK' && (
+                          <Link
+                            to={`/pendaftar/${p.id}/seragam`}
+                            className="rounded p-1.5 text-indigo-600 transition hover:bg-indigo-50"
+                            title={
+                              p.ukuranBaju
+                                ? 'Edit checklist seragam (TU)'
+                                : 'Input checklist seragam (TU)'
+                            }
                           >
                             <Shirt size={18} />
-                          </button>
+                          </Link>
                         )}
                         {canReject && p.status !== 'DITOLAK' && p.status !== 'SISWA_AKTIF' && (
                           <button
@@ -707,40 +806,59 @@ export default function PendaftarListPage() {
                             <XCircle size={18} />
                           </button>
                         )}
-                        {/* Aksi PDF — hanya untuk SISWA_AKTIF.
+                        {/* Aksi PDF — tersedia sejak pembayaran LUNAS (update 4).
+                            - SISWA_AKTIF        → Bukti Pendaftaran Ulang (Tahap 2)
+                            - MENUNGGU_UKURAN_BAJU → Bukti Pembayaran (BAYAR)
                             - Kalau PDF sudah ada: tampil Print + Download.
                             - Kalau belum ada (generate awal gagal / file hilang):
                               tampil tombol Generate Ulang (superadmin only). */}
-                        {p.status === 'SISWA_AKTIF' && p.hasPdf && (
-                          <>
-                            <button
-                              onClick={() => cetakPdf(p)}
-                              className="rounded p-1.5 text-primary-600 transition hover:bg-primary-50"
-                              title="Buka PDF di tab baru (untuk cetak)"
-                            >
-                              <Printer size={18} />
-                            </button>
-                            <button
-                              onClick={() => downloadPdf(p)}
-                              className="rounded p-1.5 text-slate-600 transition hover:bg-slate-100"
-                              title="Download file PDF"
-                            >
-                              <Download size={18} />
-                            </button>
-                          </>
-                        )}
-                        {p.status === 'SISWA_AKTIF' && !p.hasPdf && (
-                          <button
-                            onClick={() => regeneratePdf(p)}
-                            disabled={busyId === p.id}
-                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-50 disabled:opacity-50"
-                            title="PDF belum tersedia — klik untuk generate ulang"
-                          >
-                            <AlertTriangle size={14} />
-                            <RefreshCw size={14} className={busyId === p.id ? 'animate-spin' : ''} />
-                            Generate PDF
-                          </button>
-                        )}
+                        {(() => {
+                          const canDownload =
+                            (p.status === 'SISWA_AKTIF' || p.status === 'MENUNGGU_UKURAN_BAJU') &&
+                            p.hasPdf;
+                          const canRegenerate =
+                            (p.status === 'SISWA_AKTIF' || p.status === 'MENUNGGU_UKURAN_BAJU') &&
+                            !p.hasPdf;
+                          if (!canDownload && !canRegenerate) return null;
+                          return (
+                            <>
+                              {canDownload && (
+                                <>
+                                  <button
+                                    onClick={() => cetakPdf(p)}
+                                    className="rounded p-1.5 text-primary-600 transition hover:bg-primary-50"
+                                    title={
+                                      p.status === 'SISWA_AKTIF'
+                                        ? 'Cetak Bukti Pendaftaran Ulang'
+                                        : 'Cetak Bukti Pembayaran'
+                                    }
+                                  >
+                                    <Printer size={18} />
+                                  </button>
+                                  <button
+                                    onClick={() => downloadPdf(p)}
+                                    className="rounded p-1.5 text-slate-600 transition hover:bg-slate-100"
+                                    title="Download file PDF"
+                                  >
+                                    <Download size={18} />
+                                  </button>
+                                </>
+                              )}
+                              {canRegenerate && (
+                                <button
+                                  onClick={() => regeneratePdf(p)}
+                                  disabled={busyId === p.id}
+                                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-50 disabled:opacity-50"
+                                  title="PDF belum tersedia — klik untuk generate ulang"
+                                >
+                                  <AlertTriangle size={14} />
+                                  <RefreshCw size={14} className={busyId === p.id ? 'animate-spin' : ''} />
+                                  Generate PDF
+                                </button>
+                              )}
+                            </>
+                          );
+                        })()}
                         <Link
                           to={`/pendaftar/${p.id}`}
                           className="rounded p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-primary-600"
@@ -769,11 +887,11 @@ export default function PendaftarListPage() {
               <ChevronLeft size={16} />
             </button>
             <span className="px-2 text-slate-600">
-              Halaman {page} / {totalPages}
+              Halaman {page} / {totalPagesFinal}
             </span>
             <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
+              onClick={() => setPage((p) => Math.min(totalPagesFinal, p + 1))}
+              disabled={page === totalPagesFinal}
               className="btn-ghost px-2 py-1"
             >
               <ChevronRight size={16} />
@@ -783,7 +901,9 @@ export default function PendaftarListPage() {
       </div>
 
       {/* Batch C: Modal Pembayaran (Bendahara) — pilih metode CASH/TRANSFER.
-          Nominal otomatis di-snapshot di backend dari Settings.harga_daftar_ulang. */}
+          Nominal otomatis di-snapshot di backend dari Settings.harga_daftar_ulang.
+          Pada saat modal dibuka, fetch harga dari endpoint settings supaya
+          Bendahara langsung lihat angka AKTUAL (bukan placeholder statis). */}
       <AnimatePresence>
         {bayarModal.open && bayarModal.target && (
           <motion.div
@@ -793,7 +913,14 @@ export default function PendaftarListPage() {
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
             onClick={() =>
               !bayarModal.submitting &&
-              setBayarModal({ open: false, target: null, metode: 'CASH', nominalSnapshot: null, submitting: false })
+              setBayarModal({
+                open: false,
+                target: null,
+                metode: 'CASH',
+                hargaDefault: 0,
+                hargaLoaded: false,
+                submitting: false,
+              })
             }
           >
             <motion.div
@@ -816,22 +943,51 @@ export default function PendaftarListPage() {
                 <b>Siswa Aktif</b> dan email + PDF akan dikirim.
               </p>
 
-              {/* Nominal snapshot (read-only) */}
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="text-xs uppercase tracking-wider text-slate-500">
-                  Nominal pembayaran (snapshot)
-                </div>
-                <div className="mt-1 text-2xl font-bold text-slate-900">
-                  {bayarModal.nominalSnapshot != null
-                    ? formatRupiah(bayarModal.nominalSnapshot)
-                    : '— (akan di-snapshot saat submit)'}
-                </div>
-                <p className="mt-1 text-xs text-slate-500">
-                  Nominal otomatis dari setting{' '}
-                  <code className="font-mono text-[11px]">harga_daftar_ulang</code>{' '}
-                  dan tercatat permanen di struk + PDF bukti pendaftaran ulang.
-                </p>
+              {/* Nominal Pembayaran (Snapshot) — fetch dari settings saat modal
+                  dibuka. Tampilkan angka AKTUAL, bukan placeholder statis.
+                  Kalau settings belum diset (null/0) → warning + disable submit. */}
+              <div className="label mt-1">Nominal Pembayaran (Snapshot) *</div>
+              <div
+                data-testid="catat-bayar-snapshot"
+                className={`mt-1 rounded-lg border p-4 ${
+                  !bayarModal.hargaLoaded
+                    ? 'border-slate-200 bg-slate-50'
+                    : bayarModal.hargaDefault > 0
+                      ? 'border-emerald-200 bg-emerald-50/40'
+                      : 'border-amber-300 bg-amber-50'
+                }`}
+              >
+                {!bayarModal.hargaLoaded ? (
+                  // Loading skeleton saat fetch settings
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <RefreshCw size={12} className="animate-spin" />
+                      Memuat harga…
+                    </div>
+                    <div className="h-7 w-40 animate-pulse rounded bg-slate-200" />
+                  </div>
+                ) : bayarModal.hargaDefault > 0 ? (
+                  <>
+                    <div className="text-2xl font-bold tracking-tight text-slate-900">
+                      {formatRupiah(bayarModal.hargaDefault)}
+                    </div>
+                    <p className="mt-1.5 text-[11px] leading-snug text-slate-600">
+                      Nominal otomatis dari setting{' '}
+                      <code className="font-mono">harga_daftar_ulang</code> dan
+                      tercatat permanen di struk + PDF bukti pendaftaran ulang.
+                    </p>
+                  </>
+                ) : (
+                  <div className="flex items-start gap-2 text-sm font-semibold text-amber-900">
+                    <span className="mt-0.5 text-base">⚠</span>
+                    <span>
+                      Harga belum diatur — silakan atur dulu di menu Bendahara
+                      (Pengaturan Harga Pendaftaran).
+                    </span>
+                  </div>
+                )}
               </div>
+
 
               {/* Metode Pembayaran */}
               <label className="label mt-4">Metode Pembayaran *</label>
@@ -857,7 +1013,14 @@ export default function PendaftarListPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    setBayarModal({ open: false, target: null, metode: 'CASH', nominalSnapshot: null, submitting: false })
+                    setBayarModal({
+                      open: false,
+                      target: null,
+                      metode: 'CASH',
+                      hargaDefault: 0,
+                      hargaLoaded: false,
+                      submitting: false,
+                    })
                   }
                   disabled={bayarModal.submitting}
                   className="btn-ghost"
@@ -867,8 +1030,21 @@ export default function PendaftarListPage() {
                 <button
                   type="button"
                   onClick={submitBayar}
-                  disabled={bayarModal.submitting}
+                  disabled={
+                    bayarModal.submitting ||
+                    !bayarModal.hargaLoaded ||
+                    // Disable kalau harga default belum di-set (=0)
+                    // → supaya tidak ada transaksi tercatat tanpa nominal.
+                    bayarModal.hargaDefault === 0
+                  }
                   className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                  title={
+                    !bayarModal.hargaLoaded
+                      ? 'Sedang memuat harga…'
+                      : bayarModal.hargaDefault === 0
+                        ? 'Atur harga dulu di menu Bendahara'
+                        : 'Catat pembayaran'
+                  }
                 >
                   <Check size={14} />
                   {bayarModal.submitting ? 'Memproses…' : 'Catat Pembayaran'}
@@ -879,82 +1055,7 @@ export default function PendaftarListPage() {
         )}
       </AnimatePresence>
 
-      {/* Batch C: Modal Ukuran Baju (TU) — pilih dari grid XS..XXXL. */}
-      <AnimatePresence>
-        {ukuranModal.open && ukuranModal.target && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-            onClick={() =>
-              !ukuranModal.submitting &&
-              setUkuranModal({ open: false, target: null, ukuranBaju: 'M', submitting: false })
-            }
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="card w-full max-w-md p-6"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="mb-1 flex items-center gap-2 text-indigo-600">
-                <Shirt size={20} />
-                <h3 className="text-lg font-semibold">Input Ukuran Baju</h3>
-              </div>
-              <p className="mb-4 text-sm text-slate-600">
-                Anda akan mencatat ukuran baju untuk:{' '}
-                <b>{ukuranModal.target.namaLengkap}</b> ({ukuranModal.target.registrationNumber}).
-                Status akan otomatis berubah. Kalau pembayaran juga sudah
-                LUNAS, pendaftar langsung menjadi <b>Siswa Aktif</b> dan email + PDF akan dikirim.
-              </p>
-              <label className="label flex items-center gap-1.5">
-                <Shirt size={14} /> Ukuran Baju *
-              </label>
-              <div className="grid grid-cols-7 gap-1.5">
-                {UKURAN_BAJU_OPTIONS.map((size) => (
-                  <button
-                    key={size}
-                    type="button"
-                    disabled={ukuranModal.submitting}
-                    onClick={() => setUkuranModal((m) => ({ ...m, ukuranBaju: size }))}
-                    className={`rounded-md border px-2 py-2 text-sm font-medium transition ${
-                      ukuranModal.ukuranBaju === size
-                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-500'
-                        : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
-                    }`}
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setUkuranModal({ open: false, target: null, ukuranBaju: 'M', submitting: false })
-                  }
-                  disabled={ukuranModal.submitting}
-                  className="btn-ghost"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  onClick={submitUkuran}
-                  disabled={ukuranModal.submitting || !ukuranModal.ukuranBaju}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  <Check size={14} />
-                  {ukuranModal.submitting ? 'Memproses…' : 'Simpan Ukuran Baju'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Batch C: Modal Ukuran Baju (TU) — sudah dihapus Batch D. */}
 
       {/* Modal alasan penolakan */}
       <AnimatePresence>
@@ -1081,8 +1182,7 @@ export default function PendaftarListPage() {
                 </div>
                 <div>
                   <label className="label">Jenis Kelamin *</label>
-                  <select
-                    className="input"
+                  <CustomSelect
                     value={createModal.form.jenisKelamin}
                     onChange={(e) =>
                       setCreateModal((m) => ({
@@ -1094,7 +1194,7 @@ export default function PendaftarListPage() {
                   >
                     <option value="L">Laki-laki</option>
                     <option value="P">Perempuan</option>
-                  </select>
+                  </CustomSelect>
                 </div>
                 <div>
                   <label className="label">Tempat Lahir *</label>
@@ -1143,8 +1243,7 @@ export default function PendaftarListPage() {
                 </div>
                 <div>
                   <label className="label">Agama *</label>
-                  <select
-                    className="input"
+                  <CustomSelect
                     value={createModal.form.agama}
                     onChange={(e) =>
                       setCreateModal((m) => ({
@@ -1159,7 +1258,7 @@ export default function PendaftarListPage() {
                         {a}
                       </option>
                     ))}
-                  </select>
+                  </CustomSelect>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="label">Sekolah Asal *</label>
@@ -1266,8 +1365,7 @@ export default function PendaftarListPage() {
                 </div>
                 <div>
                   <label className="label">Jurusan *</label>
-                  <select
-                    className="input"
+                  <CustomSelect
                     value={createModal.form.jurusanId}
                     onChange={(e) =>
                       setCreateModal((m) => ({
@@ -1283,12 +1381,11 @@ export default function PendaftarListPage() {
                         {j.code} — {j.name}
                       </option>
                     ))}
-                  </select>
+                  </CustomSelect>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="label">Gelombang *</label>
-                  <select
-                    className="input"
+                  <CustomSelect
                     value={createModal.form.gelombangId}
                     onChange={(e) =>
                       setCreateModal((m) => ({
@@ -1304,7 +1401,7 @@ export default function PendaftarListPage() {
                         {g.name} {g.isActive ? '' : '(non-aktif)'}
                       </option>
                     ))}
-                  </select>
+                  </CustomSelect>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="label">Prestasi (opsional)</label>

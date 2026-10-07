@@ -26,6 +26,7 @@ import { LaporanModule } from './laporan/laporan.module';
 import { FonnteModule } from './fonnte/fonnte.module';
 import { RekapHarianModule } from './rekap-harian/rekap-harian.module';
 import { TahunAjaranModule } from './tahun-ajaran/tahun-ajaran.module';
+import { SeragamModule } from './seragam/seragam.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { TahunAjaranModule } from './tahun-ajaran/tahun-ajaran.module';
     FonnteModule,
     RekapHarianModule,
     TahunAjaranModule,
+    SeragamModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

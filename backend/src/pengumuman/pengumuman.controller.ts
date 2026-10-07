@@ -17,6 +17,7 @@ import {
   IsString,
   Min,
 } from 'class-validator';
+import { ApiBearerAuth, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { PengumumanService } from './pengumuman.service';
 import { Public } from '../common/decorators/public.decorator';
 import { Permissions } from '../common/decorators/permissions.decorator';
@@ -24,25 +25,39 @@ import { CurrentUser, JwtUserPayload } from '../common/decorators/current-user.d
 import { AuditLogService } from '../audit-log/audit-log.service';
 
 class CreatePengumumanDto {
+  @ApiProperty({ type: String, description: 'Judul pengumuman' })
   @IsString() @IsNotEmpty() judul!: string;
+  @ApiProperty({ type: String, description: 'Path foto pengumuman (relativePath dari /api/upload)' })
   @IsString() @IsNotEmpty() foto!: string;
+  @ApiPropertyOptional({ type: Boolean, description: 'Apakah pengumuman sedang aktif ditampilkan' })
   @IsOptional() @IsBoolean() aktif?: boolean;
+  @ApiPropertyOptional({ type: Number, minimum: 0, description: 'Urutan tampil pengumuman' })
   @IsOptional() @IsInt() @Min(0) urutan?: number;
   // Jadwal tayang. Format: "YYYY-MM-DD" dari <input type="date">.
   // null/empty = tidak dibatasi di sisi itu.
+  @ApiPropertyOptional({ type: String, description: 'Tanggal mulai tayang pengumuman (YYYY-MM-DD)' })
   @IsOptional() @IsDateString() tanggalMulai?: string;
+  @ApiPropertyOptional({ type: String, description: 'Tanggal selesai tayang pengumuman (YYYY-MM-DD)' })
   @IsOptional() @IsDateString() tanggalSelesai?: string;
 }
 
 class UpdatePengumumanDto {
+  @ApiPropertyOptional({ type: String, description: 'Judul pengumuman' })
   @IsOptional() @IsString() @IsNotEmpty() judul?: string;
+  @ApiPropertyOptional({ type: String, description: 'Path foto pengumuman' })
   @IsOptional() @IsString() @IsNotEmpty() foto?: string;
+  @ApiPropertyOptional({ type: Boolean, description: 'Apakah pengumuman sedang aktif ditampilkan' })
   @IsOptional() @IsBoolean() aktif?: boolean;
+  @ApiPropertyOptional({ type: Number, minimum: 0, description: 'Urutan tampil pengumuman' })
   @IsOptional() @IsInt() @Min(0) urutan?: number;
+  @ApiPropertyOptional({ type: String, description: 'Tanggal mulai tayang pengumuman (YYYY-MM-DD)' })
   @IsOptional() @IsDateString() tanggalMulai?: string;
+  @ApiPropertyOptional({ type: String, description: 'Tanggal selesai tayang pengumuman (YYYY-MM-DD)' })
   @IsOptional() @IsDateString() tanggalSelesai?: string;
 }
 
+@ApiTags('Pengumuman')
+@ApiBearerAuth('bearer')
 @Controller('pengumuman')
 export class PengumumanController {
   constructor(

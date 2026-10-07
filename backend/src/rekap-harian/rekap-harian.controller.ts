@@ -10,6 +10,7 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { ApiBearerAuth, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
   JwtUserPayload,
@@ -19,9 +20,12 @@ import { FonnteService } from '../fonnte/fonnte.service';
 
 class ManualTriggerDto {
   /** ISO date "YYYY-MM-DD" — kalau kosong, pakai hari ini */
+  @ApiPropertyOptional({ type: String, description: 'Tanggal referensi rekap (ISO YYYY-MM-DD). Kosongkan untuk hari ini' })
   date?: string;
 }
 
+@ApiTags('Rekap Harian')
+@ApiBearerAuth('bearer')
 @Controller('rekap-harian')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class RekapHarianController {

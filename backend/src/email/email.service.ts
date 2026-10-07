@@ -259,6 +259,62 @@ export class EmailService {
     });
   }
 
+  /**
+   * Email "Bukti Pembayaran" — dikirim saat Bendahara catat pembayaran
+   * (TANPA menunggu ukuran baju). PDF lampiran adalah mode 'BAYAR'
+   * (badge "SUDAH BAYAR", ada nominal & metode, TIDAK ada ukuran baju).
+   *
+   * Setelah email ini, siswa masih dalam status MENUNGGU_UKURAN_BAJU sampai
+   * TU input ukuran baju saat daftar ulang fisik → barulah status flip ke
+   * SISWA_AKTIF dan email "Selamat" + PDF Tahap 2 dikirim.
+   */
+  async sendBuktiPembayaran(
+    to: string,
+    regNumber: string,
+    nominalPembayaran: number | string,
+    dibayarOlehName?: string,
+    dibayarOlehEmail?: string,
+    pdfSignature?: string | null,
+    attachments?: Array<{ filename: string; path?: string; content?: Buffer; contentType?: string }>,
+    opts?: { metodePembayaran?: 'CASH' | 'TRANSFER' | null },
+  ) {
+    const downloadUrl = pdfSignature
+      ? `${process.env.FRONTEND_USER_ORIGIN || 'http://localhost:5173'}/cek-status?reg=${encodeURIComponent(regNumber)}`
+      : null;
+    const rupiah = (n: number | string) =>
+      new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0,
+      }).format(Number(n));
+    const metodeLabel = opts?.metodePembayaran === 'TRANSFER' ? 'Transfer Bank' : 'Tunai';
+
+    return this.send({
+      to,
+      subject: `[SPMB] Bukti Pembayaran Daftar Ulang: ${regNumber}`,
+      html: `
+        <p>Halo,</p>
+        <p>Terima kasih. <b>Pembayaran daftar ulang Anda telah kami terima</b>.</p>
+        <p>Nomor Pendaftaran: <b>${regNumber}</b></p>
+        <p>Total Pembayaran: <b>${rupiah(nominalPembayaran)}</b> (${metodeLabel})</p>
+        <p>Terlampir pada email ini adalah <b>Bukti Pembayaran</b> dalam format PDF yang
+           bisa Anda simpan atau cetak untuk arsip pribadi.</p>
+        ${downloadUrl ? `<p>Anda juga dapat mengunduh ulang bukti pembayaran di
+           <a href="${downloadUrl}">halaman Cek Status</a> (cukup masukkan nomor pendaftaran Anda).</p>` : ''}
+        ${dibayarOlehName ? `<p>Dicatat oleh: <b>${dibayarOlehName}</b>${dibayarOlehEmail ? ` (${dibayarOlehEmail})` : ''}</p>` : ''}
+        <p><b>Langkah selanjutnya:</b> ukuran baju akan dicatat terpisah oleh petugas Tata
+           Usaha (TU) saat Anda datang ke sekolah untuk melakukan daftar ulang fisik
+           pada jam operasional 08.00–15.00 WITA. Setelah itu, status Anda akan resmi
+           menjadi <b>Siswa Aktif</b>.</p>
+        <p>Informasi lebih lanjut terkait teknis pelaksanaan tahun ajaran baru akan
+           diinformasikan melalui pihak sekolah.</p>
+        <p>Terima kasih.</p>
+      `,
+      relatedType: 'pendaftar',
+      attachments,
+    });
+  }
+
   async notifyAdminNewPendaftar(adminEmails: string[], regNumber: string, pendaftarName: string) {
     if (!adminEmails.length) return;
     return this.send({

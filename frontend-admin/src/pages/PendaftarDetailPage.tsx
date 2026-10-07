@@ -8,6 +8,7 @@ import {
   Download,
   RefreshCw,
   AlertTriangle,
+  CheckCircle2,
   Check,
   Mail,
   Calendar,
@@ -21,6 +22,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { CustomSelect } from '../components/CustomSelect';
 import {
   STATUS_COLORS,
   UKURAN_BAJU_OPTIONS,
@@ -81,16 +83,30 @@ export default function PendaftarDetailPage() {
   });
 
   // Batch C: Modal Pembayaran (Bendahara)
-  const [bayarModal, setBayarModal] = useState<{ open: boolean; metode: 'CASH' | 'TRANSFER' }>({
+  //
+  // Harga di-fetch dari Settings.harga_daftar_ulang saat modal dibuka
+  // supaya user langsung lihat angka AKTUAL (bukan placeholder statis).
+  // Backend yang handle snapshot — frontend cuma display saja, tidak ada
+  // input override.
+  //
+  // Opsi A: kalau pendaftar sudah SISWA_AKTIF (re-edit setelah status final),
+  // Bendahara WAJIB isi alasan perubahan. Untuk pendaftar baru, reason opsional.
+  const [bayarModal, setBayarModal] = useState<{
+    open: boolean;
+    metode: 'CASH' | 'TRANSFER';
+    defaultNominal: number;
+    hargaLoaded: boolean;
+    reason: string;
+  }>({
     open: false,
     metode: 'CASH',
+    defaultNominal: 0,
+    hargaLoaded: false,
+    reason: '',
   });
 
-  // Batch C: Modal Ukuran Baju (TU)
-  const [ukuranModal, setUkuranModal] = useState<{ open: boolean; ukuranBaju: string }>({
-    open: false,
-    ukuranBaju: 'M',
-  });
+  // Batch D: Modal Ukuran Baju (TU) lama sudah dihapus — sekarang pakai halaman
+  // /pendaftar/:id/seragam (Formulir Pengambilan Seragam lengkap).
 
   // CRUD: Modal Edit (Admin/Superadmin, gate: spmb.update)
   const [editModal, setEditModal] = useState<{ open: boolean; form: Partial<EditFormState> }>({
@@ -147,19 +163,80 @@ export default function PendaftarDetailPage() {
     }
   };
 
+  /**
+   * Buka modal Catat Pembayaran. Fetch harga dari Settings supaya modal
+   * langsung menampilkan angka AKTUAL (bukan placeholder statis). Kalau
+   * pendaftar sudah pernah LUNAS (re-edit), gunakan nominalPembayaran
+   * existing sebagai display — supaya Bendahara tidak tanpa sengaja mengubah
+   * nominal transaksi yang sudah tercatat.
+   */
+  const openBayarModal = async (metode: 'CASH' | 'TRANSFER') => {
+    setBayarModal((mod) => ({
+      ...mod,
+      open: true,
+      metode,
+      hargaLoaded: false,
+      reason: '',
+    }));
+    try {
+      // Re-edit: pakai nominal existing kalau sudah pernah dicatat
+      const existing = Number(data?.nominalPembayaran ?? 0);
+      if (existing > 0) {
+        console.log('[CatatPembayaran] Re-edit — pakai nominal existing:', existing);
+        setBayarModal((mod) => ({
+          ...mod,
+          defaultNominal: existing,
+          hargaLoaded: true,
+        }));
+        return;
+      }
+      // Fetch harga default dari Settings.harga_daftar_ulang
+      console.log('[CatatPembayaran] Fetch GET /settings/harga-daftar-ulang…');
+      const res = await api.get<{ value: number }>('/settings/harga-daftar-ulang');
+      const v = Number(res.data?.value ?? 0);
+      console.log('[CatatPembayaran] Harga default dari settings:', v);
+      setBayarModal((mod) => ({
+        ...mod,
+        defaultNominal: v,
+        hargaLoaded: true,
+      }));
+    } catch (e: any) {
+      console.warn('[CatatPembayaran] Gagal fetch harga default:', e);
+      setBayarModal((mod) => ({ ...mod, hargaLoaded: true }));
+    }
+  };
+
   const submitBayar = async () => {
+    // Opsi A: kalau pendaftar sudah SISWA_AKTIF (re-edit), reason WAJIB diisi.
+    if (isAktif && !bayarModal.reason.trim()) {
+      toast.error('Alasan perubahan wajib diisi untuk re-edit pembayaran setelah Siswa Aktif');
+      return;
+    }
     setBusy(true);
     try {
+      // Backend snapshot nominal otomatis dari Settings.harga_daftar_ulang.
+      // Frontend cuma kirim metode — harga global dipakai langsung.
+      // Sertakan `reason` kalau diisi (Opsi A).
+      const payload: { metode: 'CASH' | 'TRANSFER'; reason?: string } = {
+        metode: bayarModal.metode,
+      };
+      if (bayarModal.reason.trim()) payload.reason = bayarModal.reason.trim();
       const res = await api.post<{ pdfGenerated: boolean; statusLabel: string }>(
         `/pendaftar/${id}/pembayaran`,
-        { metode: bayarModal.metode },
+        payload,
       );
       toast.success(
         res.data?.pdfGenerated
           ? `Pembayaran tercatat — status: ${res.data.statusLabel}. PDF + email terkirim.`
           : `Pembayaran tercatat — status: ${res.data.statusLabel}.`,
       );
-      setBayarModal({ open: false, metode: 'CASH' });
+      setBayarModal({
+        open: false,
+        metode: 'CASH',
+        defaultNominal: 0,
+        hargaLoaded: false,
+        reason: '',
+      });
       await load();
     } catch (e: any) {
       toast.error(e?.response?.data?.message || e.message);
@@ -168,30 +245,8 @@ export default function PendaftarDetailPage() {
     }
   };
 
-  const submitUkuran = async () => {
-    if (!ukuranModal.ukuranBaju) {
-      toast.error('Ukuran baju wajib dipilih');
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await api.post<{ pdfGenerated: boolean; statusLabel: string }>(
-        `/pendaftar/${id}/ukuran-baju`,
-        { ukuranBaju: ukuranModal.ukuranBaju },
-      );
-      toast.success(
-        res.data?.pdfGenerated
-          ? `Ukuran ${ukuranModal.ukuranBaju} tercatat — status: ${res.data.statusLabel}. PDF + email terkirim.`
-          : `Ukuran ${ukuranModal.ukuranBaju} tercatat — status: ${res.data.statusLabel}.`,
-      );
-      setUkuranModal({ open: false, ukuranBaju: 'M' });
-      await load();
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message || e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  // Batch D: submitUkuran() sudah dihapus — input ukuran baju via halaman
+  // /pendaftar/:id/seragam (link dari card "Ukuran Baju (TU)").
 
   // ===========================================================================
   // CRUD ADMIN (spmb.update / spmb.delete)
@@ -381,7 +436,11 @@ export default function PendaftarDetailPage() {
 
   const apiOrigin = api.defaults.baseURL?.replace(/\/api$/, '') || '';
   const canBayar = hasPermission('spmb.bayar');
-  const canUkuranBaju = hasPermission('spmb.ukuran_baju');
+  // Batch D: form seragam pindah ke halaman /pendaftar/:id/seragam.
+  // Fallback ke permission lama supaya TU existing tidak kehilangan akses.
+  const canUkuranBaju =
+    hasPermission('spmb.checklist_seragam.manage') ||
+    hasPermission('spmb.ukuran_baju');
   const canReject = hasPermission('spmb.reject');
   const canUpdate = hasPermission('spmb.update');
   const canDelete = hasPermission('spmb.delete');
@@ -390,6 +449,7 @@ export default function PendaftarDetailPage() {
   const isLunas = data.statusPembayaran === 'LUNAS';
   const isUkuranSet = !!data.ukuranBaju;
   const isAktif = data.status === 'SISWA_AKTIF';
+  const isMenungguUkuranBaju = data.status === 'MENUNGGU_UKURAN_BAJU';
   const isDitolak = data.status === 'DITOLAK';
 
   return (
@@ -435,7 +495,8 @@ export default function PendaftarDetailPage() {
         <div className="card md:col-span-2">
           <h2 className="text-lg font-semibold text-slate-900">Data Pendaftar</h2>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Item label="Jenis Kelamin" value={data.jenisKelamin === 'L' ? 'Laki-laki' : 'Perempuan'} />
+            <Item label="Jenis Kelamin" value={data.jenisKelamin === 'L' ? 'Laki-laki' : 'Perempuan'} uppercase />
+            <Item label="Agama" value={data.agama} uppercase />
             <Item label="NISN" value={data.nisn} />
             <Item
               label="Tempat, Tgl Lahir"
@@ -537,7 +598,7 @@ export default function PendaftarDetailPage() {
                 </p>
               )}
               <button
-                onClick={() => setBayarModal({ open: true, metode: (data.metodePembayaran as 'CASH' | 'TRANSFER') || 'CASH' })}
+                onClick={() => openBayarModal((data.metodePembayaran as 'CASH' | 'TRANSFER') || 'CASH')}
                 disabled={busy}
                 className={`mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-md px-4 py-2.5 text-sm font-medium text-white transition disabled:opacity-50 ${
                   isLunas
@@ -591,24 +652,51 @@ export default function PendaftarDetailPage() {
                       <span className="font-medium">{data.ukuranBajuDisetOleh.name}</span>
                     </div>
                   )}
+
+                  {/* Ringkasan kelengkapan item seragam — badge kuning kalau
+                      masih ada yang belum dicentang, hijau kalau lengkap semua.
+                      Tetap muncul walau status keseluruhan sudah SUDAH
+                      (submit pertama sudah dilakukan) supaya TU bisa lihat
+                      progress tanpa harus buka form Edit Formulir Seragam. */}
+                  {data.seragamKelengkapan && (
+                    <div className="flex justify-between border-t border-slate-200/60 pt-2">
+                      <span className="text-slate-500">Kelengkapan Item</span>
+                      {data.seragamKelengkapan.belumDidapat > 0 ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"
+                          title={`${data.seragamKelengkapan.sudahDidapat} dari ${data.seragamKelengkapan.totalItems} item sudah di-centang`}
+                        >
+                          <AlertTriangle size={11} /> {data.seragamKelengkapan.belumDidapat} baju belum dicentang
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800"
+                          title={`${data.seragamKelengkapan.totalItems} item sudah lengkap`}
+                        >
+                          <CheckCircle2 size={11} /> Semua item sudah lengkap
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="mt-1 text-sm text-slate-600">
-                  Ukuran baju belum diinput. Klik tombol di bawah untuk pilih XS..XXXL.
+                  Ukuran baju belum diinput. Klik tombol di bawah untuk
+                  membuka Formulir Pengambilan Seragam lengkap (checklist per
+                  item + tanggal + penerima).
                 </p>
               )}
-              <button
-                onClick={() => setUkuranModal({ open: true, ukuranBaju: data.ukuranBaju || 'M' })}
-                disabled={busy}
-                className={`mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-md px-4 py-2.5 text-sm font-medium text-white transition disabled:opacity-50 ${
+              <Link
+                to={`/pendaftar/${data.id}/seragam`}
+                className={`mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-md px-4 py-2.5 text-sm font-medium text-white transition ${
                   isUkuranSet
                     ? 'bg-slate-600 hover:bg-slate-700'
                     : 'bg-indigo-600 hover:bg-indigo-700'
                 }`}
               >
                 <Shirt size={16} />
-                {isUkuranSet ? 'Re-edit Ukuran Baju' : 'Input Ukuran Baju'}
-              </button>
+                {isUkuranSet ? 'Edit Formulir Seragam' : 'Input Formulir Seragam'}
+              </Link>
             </div>
           )}
 
@@ -635,17 +723,26 @@ export default function PendaftarDetailPage() {
             </div>
           )}
 
-          {/* Cetak Bukti PDF — hanya untuk SISWA_AKTIF.
-              PDF + email auto-terkirim saat status berubah ke SISWA_AKTIF. */}
-          {isAktif && (
-            <div className="card border-2 border-emerald-200 bg-emerald-50/40">
+          {/* Cetak Bukti PDF — tersedia sejak pembayaran LUNAS (update 4).
+              - SISWA_AKTIF          → Bukti Pendaftaran Ulang (badge "SISWA AKTIF")
+              - MENUNGGU_UKURAN_BAJU → Bukti Pembayaran (badge "SUDAH BAYAR") */}
+          {(isAktif || isMenungguUkuranBaju) && (
+            <div
+              className={`card border-2 ${
+                isAktif
+                  ? 'border-emerald-200 bg-emerald-50/40'
+                  : 'border-blue-200 bg-blue-50/40'
+              }`}
+            >
               <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
-                <Printer size={18} className="text-emerald-600" />
-                Cetak Bukti Pendaftaran Ulang
+                <Printer size={18} className={isAktif ? 'text-emerald-600' : 'text-blue-600'} />
+                {isAktif ? 'Cetak Bukti Pendaftaran Ulang' : 'Cetak Bukti Pembayaran'}
               </h2>
               <p className="mt-1 text-sm text-slate-600">
                 {data.pdfPath
-                  ? 'PDF siap dicetak. Klik Buka untuk lihat di tab baru, atau Download untuk simpan file.'
+                  ? isAktif
+                    ? 'Bukti Pendaftaran Ulang sudah tersedia — siswa resmi menjadi Siswa Aktif.'
+                    : 'Pembayaran sudah tercatat. Bukti Pembayaran tersedia di bawah. Ukuran baju akan dicatat oleh TU saat siswa datang ke sekolah.'
                   : 'PDF belum tersedia — kemungkinan generate awal gagal atau file hilang dari storage.'}
               </p>
 
@@ -764,7 +861,16 @@ export default function PendaftarDetailPage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-            onClick={() => !busy && setBayarModal({ open: false, metode: 'CASH' })}
+            onClick={() =>
+              !busy &&
+              setBayarModal({
+                open: false,
+                metode: 'CASH',
+                defaultNominal: 0,
+                hargaLoaded: false,
+                reason: '',
+              })
+            }
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
@@ -784,20 +890,60 @@ export default function PendaftarDetailPage() {
                 Status akan otomatis berubah. Kalau ukuran baju juga sudah
                 diinput TU, pendaftar langsung menjadi <b>Siswa Aktif</b> dan email + PDF akan dikirim.
               </p>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="text-xs uppercase tracking-wider text-slate-500">
-                  Nominal pembayaran (snapshot)
+
+              {/* Opsi A: warning kalau re-edit setelah Siswa Aktif */}
+              {isAktif && (
+                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <div>
+                      <b>Re-edit setelah Siswa Aktif.</b> Perubahan akan dicatat
+                      di audit log untuk forensik. <b>Wajib mengisi alasan</b>{' '}
+                      di bawah ini.
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-1 text-2xl font-bold text-slate-900">
-                  {data.nominalPembayaran != null
-                    ? formatRupiah(data.nominalPembayaran)
-                    : '— (akan di-snapshot saat submit)'}
-                </div>
-                <p className="mt-1 text-xs text-slate-500">
+              )}
+
+              {/* Nominal Pembayaran (Snapshot)
+                  ─────────────────────────────────────────────────────────────
+                  - Tampilkan nominal AKTUAL yang akan di-snapshot, format Rupiah
+                    jelas (mis. "Rp 450.000") — bukan placeholder "—".
+                  - Sumber: fetch GET /settings/harga-daftar-ulang saat modal
+                    dibuka (lihat `openBayarModal()`).
+                  - Kalau harga BELUM diset (null/0), tampilkan warning besar &
+                    disable tombol submit — supaya tidak ada transaksi tercatat
+                    dengan nominal kosong/salah.
+                  - Tidak ada input override dari Bendahara — snapshot diambil
+                    otomatis dari setting global (konsistensi struk & PDF). */}
+              <div className="label mt-1">Nominal Pembayaran (Snapshot) *</div>
+              <div
+                className={`mt-1 rounded-lg border p-4 ${
+                  bayarModal.defaultNominal > 0
+                    ? 'border-emerald-200 bg-emerald-50/40'
+                    : 'border-amber-300 bg-amber-50'
+                }`}
+              >
+                {bayarModal.defaultNominal > 0 ? (
+                  <div className="text-2xl font-bold tracking-tight text-slate-900">
+                    {formatRupiah(bayarModal.defaultNominal)}
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 text-sm font-semibold text-amber-900">
+                    <span className="mt-0.5 text-base">⚠</span>
+                    <span>
+                      Harga belum diatur — silakan atur dulu di menu
+                      Bendahara (Pengaturan Harga Pendaftaran).
+                    </span>
+                  </div>
+                )}
+                <p className="mt-1.5 text-[11px] leading-snug text-slate-600">
                   Nominal otomatis dari setting{' '}
-                  <code className="font-mono text-[11px]">harga_daftar_ulang</code>.
+                  <code className="font-mono">harga_daftar_ulang</code> dan
+                  tercatat permanen di struk + PDF bukti pendaftaran ulang.
                 </p>
               </div>
+
               <label className="label mt-4">Metode Pembayaran *</label>
               <div className="grid grid-cols-2 gap-2">
                 {(['CASH', 'TRANSFER'] as const).map((m) => (
@@ -816,10 +962,44 @@ export default function PendaftarDetailPage() {
                   </button>
                 ))}
               </div>
+
+              {/* Opsi A: field Alasan perubahan (wajib kalau re-edit Siswa Aktif).
+                  Ditampilkan juga untuk non-aktif sebagai opsional (Bendahara
+                  bisa tulis konteks edit kalau perlu). */}
+              <label className="label mt-4">
+                Alasan Perubahan{isAktif ? ' *' : ' (opsional)'}
+              </label>
+              <textarea
+                className="input min-h-[60px]"
+                value={bayarModal.reason}
+                onChange={(e) =>
+                  setBayarModal((mod) => ({ ...mod, reason: e.target.value }))
+                }
+                placeholder={
+                  isAktif
+                    ? 'Contoh: Koreksi nominal setelah siswa bayar tambahan, ganti metode dari CASH ke TRANSFER, dll.'
+                    : 'Opsional — tulis konteks perubahan kalau perlu'
+                }
+                disabled={busy}
+              />
+              {isAktif && (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Tercatat permanen di Audit Log (module: pendaftar) untuk forensik.
+                </p>
+              )}
+
               <div className="mt-5 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setBayarModal({ open: false, metode: 'CASH' })}
+                  onClick={() =>
+                    setBayarModal({
+                      open: false,
+                      metode: 'CASH',
+                      defaultNominal: 0,
+                      hargaLoaded: false,
+                      reason: '',
+                    })
+                  }
                   disabled={busy}
                   className="btn-ghost"
                 >
@@ -828,8 +1008,25 @@ export default function PendaftarDetailPage() {
                 <button
                   type="button"
                   onClick={submitBayar}
-                  disabled={busy}
+                  disabled={
+                    busy ||
+                    !bayarModal.hargaLoaded ||
+                    // Tombol disabled kalau harga default belum diset (0) →
+                    // supaya tidak ada transaksi tercatat tanpa nominal.
+                    bayarModal.defaultNominal === 0 ||
+                    // Opsi A: wajib reason kalau re-edit Siswa Aktif
+                    (isAktif && !bayarModal.reason.trim())
+                  }
                   className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                  title={
+                    !bayarModal.hargaLoaded
+                      ? 'Sedang memuat harga…'
+                      : bayarModal.defaultNominal === 0
+                        ? 'Atur harga dulu di menu Bendahara'
+                        : isAktif && !bayarModal.reason.trim()
+                          ? 'Isi alasan perubahan dulu (re-edit Siswa Aktif)'
+                          : 'Catat pembayaran'
+                  }
                 >
                   <Check size={14} />
                   {busy ? 'Memproses…' : 'Catat Pembayaran'}
@@ -840,76 +1037,8 @@ export default function PendaftarDetailPage() {
         )}
       </AnimatePresence>
 
-      {/* Batch C: Modal Ukuran Baju (TU) */}
-      <AnimatePresence>
-        {ukuranModal.open && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-            onClick={() => !busy && setUkuranModal({ open: false, ukuranBaju: 'M' })}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="card w-full max-w-md p-6"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="mb-1 flex items-center gap-2 text-indigo-600">
-                <Shirt size={20} />
-                <h3 className="text-lg font-semibold">Input Ukuran Baju</h3>
-              </div>
-              <p className="mb-4 text-sm text-slate-600">
-                Anda akan mencatat ukuran baju untuk:{' '}
-                <b>{data.namaLengkap}</b> ({data.registrationNumber}).
-                Status akan otomatis berubah. Kalau pembayaran juga sudah LUNAS, pendaftar langsung menjadi <b>Siswa Aktif</b> dan email + PDF akan dikirim.
-              </p>
-              <label className="label flex items-center gap-1.5">
-                <Shirt size={14} /> Ukuran Baju *
-              </label>
-              <div className="grid grid-cols-7 gap-1.5">
-                {UKURAN_BAJU_OPTIONS.map((size) => (
-                  <button
-                    key={size}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setUkuranModal((m) => ({ ...m, ukuranBaju: size }))}
-                    className={`rounded-md border px-2 py-2 text-sm font-medium transition ${
-                      ukuranModal.ukuranBaju === size
-                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-500'
-                        : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
-                    }`}
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setUkuranModal({ open: false, ukuranBaju: 'M' })}
-                  disabled={busy}
-                  className="btn-ghost"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  onClick={submitUkuran}
-                  disabled={busy || !ukuranModal.ukuranBaju}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  <Check size={14} />
-                  {busy ? 'Memproses…' : 'Simpan Ukuran Baju'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Batch D: Modal Ukuran Baju (TU) sudah dihapus — input ukuran baju
+          via halaman /pendaftar/:id/seragam (link dari card di sidebar). */}
 
       {/* CRUD: Modal Edit Data Pendaftar */}
       <AnimatePresence>
@@ -956,8 +1085,7 @@ export default function PendaftarDetailPage() {
                 </div>
                 <div>
                   <label className="label">Jenis Kelamin *</label>
-                  <select
-                    className="input"
+                  <CustomSelect
                     value={editModal.form.jenisKelamin || 'L'}
                     onChange={(e) =>
                       setEditModal((m) => ({
@@ -969,7 +1097,7 @@ export default function PendaftarDetailPage() {
                   >
                     <option value="L">Laki-laki</option>
                     <option value="P">Perempuan</option>
-                  </select>
+                  </CustomSelect>
                 </div>
                 <div>
                   <label className="label">Tempat Lahir *</label>
@@ -1009,8 +1137,7 @@ export default function PendaftarDetailPage() {
                 </div>
                 <div>
                   <label className="label">Agama *</label>
-                  <select
-                    className="input"
+                  <CustomSelect
                     value={editModal.form.agama || 'ISLAM'}
                     onChange={(e) =>
                       setEditModal((m) => ({ ...m, form: { ...m.form, agama: e.target.value } }))
@@ -1022,7 +1149,7 @@ export default function PendaftarDetailPage() {
                         {a}
                       </option>
                     ))}
-                  </select>
+                  </CustomSelect>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="label">Sekolah Asal *</label>
@@ -1361,11 +1488,24 @@ export default function PendaftarDetailPage() {
   );
 }
 
-function Item({ label, value, full }: { label: string; value: any; full?: boolean }) {
+function Item({
+  label,
+  value,
+  full,
+  uppercase,
+}: {
+  label: string;
+  value: any;
+  full?: boolean;
+  /** Tampilkan value dalam HURUF KAPITAL semua (untuk field enum seperti Agama/Jenis Kelamin). */
+  uppercase?: boolean;
+}) {
   return (
     <div className={full ? 'sm:col-span-2' : ''}>
       <div className="text-xs text-slate-500">{label}</div>
-      <div className="text-sm font-medium text-slate-900">{value || '-'}</div>
+      <div className={`text-sm font-medium text-slate-900${uppercase ? ' uppercase' : ''}`}>
+        {value || '-'}
+      </div>
     </div>
   );
 }

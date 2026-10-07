@@ -9,7 +9,7 @@
 //   LUNAS  + null  → MENUNGGU_UKURAN_BAJU  ("Menunggu Ukuran Baju")
 //   LUNAS  + "M"   → SISWA_AKTIF            ("Siswa Aktif")
 export const STATUS_LABELS: Record<string, string> = {
-  MENUNGGU_PERSETUJUAN: 'Menunggu Daftar Ulang',
+  MENUNGGU_PERSETUJUAN: 'Belum Daftar Ulang',
   MENUNGGU_PEMBAYARAN: 'Menunggu Pembayaran',
   MENUNGGU_UKURAN_BAJU: 'Menunggu Ukuran Baju',
   DITOLAK: 'Ditolak',
@@ -160,6 +160,11 @@ export const PERMISSION_UI_LABELS: Record<string, PermissionMeta> = {
   // ─── Pengaturan (CFG) ───────────────────────────────────────────────
   'settings.view':           { uiCode: 'CFG-01', label: 'Lihat Pengaturan Laporan',    section: 'Pengaturan' },
   'settings.manage':         { uiCode: 'CFG-02', label: 'Atur Laporan & Notifikasi',   section: 'Pengaturan' },
+
+  // ─── Seragam (SRG) — Checklist Pengambilan Seragam Siswa Baru ────────
+  'spmb.checklist_seragam.view':   { uiCode: 'SRG-01', label: 'Lihat Checklist Seragam',       section: 'Seragam' },
+  'spmb.checklist_seragam.manage': { uiCode: 'SRG-02', label: 'Input Checklist Seragam',       section: 'Seragam' },
+  'spmb.seragam_item.manage':      { uiCode: 'SRG-03', label: 'Kelola Master Item Seragam',    section: 'Seragam' },
 };
 
 /**
@@ -182,4 +187,5 @@ export const PERMISSION_SECTION_ORDER: string[] = [
   'Struk Bendahara',
   'WhatsApp',
   'Pengaturan',
+  'Seragam',
 ];

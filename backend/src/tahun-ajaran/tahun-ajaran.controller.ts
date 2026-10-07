@@ -16,9 +16,11 @@ import {
   CurrentUser,
   JwtUserPayload,
 } from '../common/decorators/current-user.decorator';
+import { ApiBearerAuth, ApiProperty, ApiTags } from '@nestjs/swagger';
 
 class ArchiveAndResetDto {
   /** Konfirmasi string — UI harus pass 'ARSIPKAN DAN RESET' persis. */
+  @ApiProperty({ type: String, minLength: 8, description: 'Konfirmasi anti fat-finger — harus persis "ARSIPKAN DAN RESET"' })
   @IsString()
   @MinLength(8)
   confirmation!: string;
@@ -34,6 +36,8 @@ class ArchiveAndResetDto {
  *   POST /tahun-ajaran/archive-and-reset
  *     → generate Excel arsip → hapus data → tulis audit log. IRREVERSIBLE.
  */
+@ApiTags('tahun-ajaran')
+@ApiBearerAuth('bearer')
 @Controller('tahun-ajaran')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class TahunAjaranController {

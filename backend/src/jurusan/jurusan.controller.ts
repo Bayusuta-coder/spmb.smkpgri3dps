@@ -9,6 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { ApiBearerAuth, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { JurusanService } from './jurusan.service';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { Public } from '../common/decorators/public.decorator';
@@ -16,16 +17,23 @@ import { CurrentUser, JwtUserPayload } from '../common/decorators/current-user.d
 import { AuditLogService } from '../audit-log/audit-log.service';
 
 class CreateJurusanDto {
+  @ApiProperty({ type: String, description: 'Kode unik jurusan (mis. "TKJ", "AKL")' })
   @IsString() @IsNotEmpty() code!: string;
+  @ApiProperty({ type: String, description: 'Nama lengkap jurusan' })
   @IsString() @IsNotEmpty() name!: string;
 }
 
 class UpdateJurusanDto {
+  @ApiPropertyOptional({ type: String, description: 'Kode unik jurusan' })
   @IsOptional() @IsString() code?: string;
+  @ApiPropertyOptional({ type: String, description: 'Nama lengkap jurusan' })
   @IsOptional() @IsString() name?: string;
+  @ApiPropertyOptional({ type: Boolean, description: 'Apakah jurusan ini aktif' })
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
+@ApiTags('jurusan')
+@ApiBearerAuth('bearer')
 @Controller('jurusan')
 export class JurusanController {
   constructor(
@@ -44,10 +52,14 @@ export class JurusanController {
   list(
     @Query('activeOnly') activeOnly?: string,
     @Query('includeDeleted') includeDeleted?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
     return this.service.findAll({
       activeOnly: activeOnly === 'true',
       includeDeleted: includeDeleted === 'true',
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
     });
   }
 

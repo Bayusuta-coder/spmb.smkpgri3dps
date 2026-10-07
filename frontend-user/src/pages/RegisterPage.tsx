@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useForm, UseFormRegisterReturn } from 'react-hook-form';
+import { useForm, Controller, UseFormRegisterReturn } from 'react-hook-form';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 import type { ActiveGelombang, RegisterResponse } from '../lib/types';
+import { DateTimePicker } from '../components/DateTimePicker';
 
 interface FormData {
   namaLengkap: string;
@@ -80,6 +81,7 @@ export default function RegisterPage() {
 
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors },
   } = useForm<FormData>({ mode: 'onBlur' });
@@ -255,10 +257,21 @@ export default function RegisterPage() {
                   />
                 </Field>
                 <Field label="Tanggal Lahir *" error={errors.tanggalLahir?.message}>
-                  <input
-                    className="input"
-                    type="date"
-                    {...register('tanggalLahir', { required: 'Wajib diisi' })}
+                  <Controller
+                    name="tanggalLahir"
+                    control={control}
+                    rules={{ required: 'Wajib diisi' }}
+                    render={({ field }) => (
+                      <DateTimePicker
+                        mode="date"
+                        disablePast={false}
+                        disableFuture
+                        defaultYear={new Date().getFullYear() - 16}
+                        value={field.value || ''}
+                        onChange={field.onChange}
+                        placeholder="Pilih tanggal lahir"
+                      />
+                    )}
                   />
                 </Field>
               </div>

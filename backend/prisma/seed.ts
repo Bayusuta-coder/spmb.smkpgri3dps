@@ -42,7 +42,15 @@ const PERMISSIONS: Array<{ code: string; module: string; action: string; descrip
   { code: 'spmb.reject',              module: 'spmb',     action: 'reject',    description: 'Tolak pendaftar dengan alasan' },
   // Batch C: 2 permission desentralisasi approval
   { code: 'spmb.bayar',               module: 'spmb',     action: 'pay',       description: 'Catat pembayaran pendaftar (Bendahara)' },
-  { code: 'spmb.ukuran_baju',         module: 'spmb',     action: 'size',      description: 'Input ukuran baju pendaftar (TU)' },
+  { code: 'spmb.ukuran_baju',         module: 'spmb',     action: 'size',      description: 'Input ukuran baju pendaftar (TU — legacy, lihat spmb.checklist_seragam)' },
+  // Batch D: Checklist seragam siswa baru (form Formulir Pengambilan Seragam).
+  // - view  : lihat checklist per siswa (admin / TU / superadmin)
+  // - manage: submit/update checklist per siswa — TU (primary) + admin fallback.
+  //           Endpoint ini sekaligus menulis pendaftar.ukuranBaju sehingga
+  //           status kelengkapan baju flip otomatis (lihat SeragamService).
+  { code: 'spmb.checklist_seragam.view',   module: 'spmb', action: 'view',    description: 'Lihat checklist seragam siswa (admin/TU/Superadmin)' },
+  { code: 'spmb.checklist_seragam.manage', module: 'spmb', action: 'manage',  description: 'Isi/update checklist seragam siswa (TU — primary)' },
+  { code: 'spmb.seragam_item.manage',      module: 'spmb', action: 'manage',  description: 'Kelola master item seragam — hanya Superadmin' },
   { code: 'spmb.export',              module: 'spmb',     action: 'export',    description: 'Export data Dapodik' },
   { code: 'spmb.scan_daftar_ulang',   module: 'spmb',     action: 'scan',      description: 'Scan QR pendaftar saat daftar ulang fisik' },
   // CRUD manual oleh admin/superadmin (batch input offline, edit typo, hapus data dummy/salah)
@@ -119,6 +127,8 @@ const ROLES: Array<{
       'spmb.approve', // deprecated tapi di-keep untuk fallback admin
       'spmb.bayar', // admin bisa catat pembayaran sebagai fallback
       'spmb.ukuran_baju', // admin bisa input ukuran baju sebagai fallback
+      'spmb.checklist_seragam.view', // admin bisa lihat checklist
+      'spmb.checklist_seragam.manage', // admin bisa isi/update checklist sebagai fallback (mis. TU cuti)
       'spmb.reject',
       'spmb.export',
       'spmb.scan_daftar_ulang',
@@ -157,7 +167,9 @@ const ROLES: Array<{
     isSystem: true,
     permissions: [
       'spmb.view',
-      'spmb.ukuran_baju',
+      'spmb.ukuran_baju',         // legacy: tetap ada untuk back-compat existing client
+      'spmb.checklist_seragam.view',
+      'spmb.checklist_seragam.manage', // primary — TU yang input checklist via form
       'spmb.scan_daftar_ulang',
       'gelombang.view',
       'jurusan.view',

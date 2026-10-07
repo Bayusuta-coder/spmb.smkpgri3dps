@@ -12,7 +12,6 @@ import {
   PartyPopper,
   Calendar,
   Building2,
-  GraduationCap,
 } from 'lucide-react';
 import { api, getApiBaseUrl } from '../lib/api';
 import { STATUS_COLORS, STATUS_LABELS } from '../lib/types';
@@ -103,22 +102,64 @@ export default function CheckStatusPage() {
               </span>
             </div>
 
-            {/* ===== Status: MENUNGGU_PERSETUJUAN ===== */}
+            {/* ===== Status: MENUNGGU_UKURAN_BAJU (label publik: "Sudah Bayar") ===== */}
+            {/* Update 4: siswa sudah bayar → bisa download Bukti Pembayaran.
+                Ukuran baju akan dicatat oleh TU saat daftar ulang fisik. */}
+            {data.status === 'MENUNGGU_UKURAN_BAJU' && (
+              <div className="mt-4 space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-blue-600" />
+                  <div>
+                    <p className="font-semibold">Pembayaran Anda telah kami terima.</p>
+                    <p className="mt-1 text-blue-800/90">
+                      Bukti Pembayaran tersedia dalam bentuk PDF di bawah ini — bisa
+                      Anda simpan atau cetak untuk arsip pribadi.
+                    </p>
+                  </div>
+                </div>
+
+                <p className="rounded-md bg-white/70 px-3 py-2 text-xs text-blue-800">
+                  <b>Langkah selanjutnya:</b> ukuran baju akan dicatat terpisah oleh
+                  petugas Tata Usaha (TU) saat Anda datang ke sekolah untuk
+                  melakukan daftar ulang fisik pada jam operasional 08.00–15.00
+                  WITA. Setelah itu, status Anda akan resmi menjadi{' '}
+                  <b>Siswa Aktif</b>.
+                </p>
+
+                {data.hasPdf && data.pdfDownloadUrl && (
+                  <motion.a
+                    initial={{ scale: 0.97, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.3 }}
+                    href={`${getApiBaseUrl().replace(/\/api$/, '')}${data.pdfDownloadUrl}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white shadow-sm transition hover:bg-blue-700"
+                  >
+                    <Download size={18} />
+                    Download Bukti Pembayaran (PDF)
+                  </motion.a>
+                )}
+              </div>
+            )}
+
+            {/* ===== Status: MENUNGGU_PERSETUJUAN (label publik: "Belum Daftar Ulang") ===== */}
             {data.status === 'MENUNGGU_PERSETUJUAN' && (
               <div className="mt-4 space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                 <div className="flex items-start gap-2">
                   <Clock size={18} className="mt-0.5 shrink-0 text-amber-600" />
                   <div>
-                    <p className="font-semibold">Pendaftaran Anda sedang menunggu persetujuan admin.</p>
+                    <p className="font-semibold">Pendaftaran Anda telah diterima.</p>
                     <p className="mt-1 text-amber-800/90">
-                      Mohon menunggu informasi lebih lanjut. Panitia akan menghubungi Anda jika
-                      pendaftaran sudah disetujui.
+                      Segera lakukan pendaftaran ulang secara langsung ke SMK PGRI 3 Denpasar
+                      (Jl. Drupadi XVII, Dewi Tara No.7, Denpasar), pada jam operasional
+                      08.00–15.00 WITA. Bawa dokumen ini sebagai bukti pendaftaran.
                     </p>
                   </div>
                 </div>
 
                 {/* Tanda Bukti Pendaftaran (Tahap 1) — selalu tersedia setelah submit.
-                    Beda dengan Bukti Pendaftaran Ulang (Tahap 2) yang ada di status SISWA_AKTIF. */}
+                    Beda dengan Bukti Pembayaran (BAYAR) dan Bukti Pendaftaran Ulang (Tahap 2). */}
                 {data.hasPdf && data.pdfDownloadUrl && (
                   <motion.a
                     initial={{ scale: 0.97, opacity: 0 }}
@@ -133,15 +174,6 @@ export default function CheckStatusPage() {
                     Download Tanda Bukti Pendaftaran (PDF)
                   </motion.a>
                 )}
-
-                <p className="flex items-start gap-1.5 rounded-md bg-white/70 px-3 py-2 text-xs text-amber-800">
-                  <FileText size={14} className="mt-0.5 shrink-0" />
-                  <span>
-                    Simpan Tanda Bukti Pendaftaran ini. Bawalah ke sekolah saat melakukan daftar ulang
-                    fisik pada jam operasional 08.00 – 15.00 WITA. Bukti PDF final dengan QR verifikasi
-                    akan tersedia setelah status berubah menjadi <b>Siswa Aktif</b>.
-                  </span>
-                </p>
               </div>
             )}
 
@@ -220,14 +252,6 @@ export default function CheckStatusPage() {
             )}
           </motion.div>
         )}
-
-        {/* Footer info kecil: alur disederhanakan */}
-        <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
-          <GraduationCap size={14} className="mr-1 inline" />
-          Alur SPMB SMK PGRI 3 Denpasar disederhanakan: <b>Submit Form</b> →{' '}
-          <b>Persetujuan Admin</b> → <b>Siswa Aktif</b> (siap daftar ulang & cetak bukti PDF di
-          sekolah).
-        </div>
       </div>
     </motion.div>
   );

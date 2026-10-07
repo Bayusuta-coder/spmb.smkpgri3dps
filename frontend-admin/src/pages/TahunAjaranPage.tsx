@@ -51,7 +51,7 @@ interface ArchiveResult {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  MENUNGGU_PERSETUJUAN: 'Menunggu Daftar Ulang',
+  MENUNGGU_PERSETUJUAN: 'Belum Daftar Ulang',
   MENUNGGU_PEMBAYARAN: 'Menunggu Pembayaran',
   MENUNGGU_UKURAN_BAJU: 'Menunggu Ukuran Baju',
   DITOLAK: 'Ditolak',

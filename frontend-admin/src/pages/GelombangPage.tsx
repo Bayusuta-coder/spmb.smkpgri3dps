@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, History, ListChecks, Trash2, AlertTriangle, X } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import HistoryTab from '../components/HistoryTab';
+import { CustomSelect } from '../components/CustomSelect';
+import { DateTimePicker } from '../components/DateTimePicker';
 
-type Tab = 'list' | 'history';
+// Tab "Riwayat Perubahan" dihapus (F3) — histori Gelombang (action
+// `gelombang.*`) bisa dilihat via Audit Log → filter module=Gelombang.
 
 export default function GelombangPage() {
   const { hasPermission } = useAuth();
-  const [tab, setTab] = useState<Tab>('list');
   const [items, setItems] = useState<any[]>([]);
   const [jurusanList, setJurusanList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,7 +100,7 @@ export default function GelombangPage() {
     <div>
       <div className="mb-4 flex flex-col items-start justify-between gap-3 md:flex-row md:items-center">
         <h1 className="text-2xl font-bold text-slate-900">Gelombang SPMB</h1>
-        {tab === 'list' && hasPermission('gelombang.manage') && (
+        {hasPermission('gelombang.manage') && (
           <button onClick={() => setShowForm(!showForm)} className="btn-primary">
             <Plus size={16} /> {showForm ? 'Tutup' : 'Gelombang Baru'}
           </button>
@@ -107,34 +108,18 @@ export default function GelombangPage() {
       </div>
 
       {/* Tabs */}
-      <div className="mb-4 flex gap-1 rounded-lg bg-slate-200 p-1">
-        <button
-          onClick={() => setTab('list')}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
-            tab === 'list' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <ListChecks size={16} /> Daftar Gelombang
-        </button>
-        <button
-          onClick={() => setTab('history')}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
-            tab === 'history' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <History size={16} /> Riwayat Perubahan
-        </button>
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold text-slate-700">Daftar Gelombang</h2>
       </div>
 
       <AnimatePresence mode="wait">
-        {tab === 'list' ? (
-          <motion.div
-            key="list"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
-          >
+        <motion.div
+          key="list"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
+        >
             {showForm && (
               <motion.form
                 initial={{ y: -8, opacity: 0 }}
@@ -155,32 +140,31 @@ export default function GelombangPage() {
                   </div>
                   <div>
                     <label className="label">Status</label>
-                    <select
-                      className="input"
+                    <CustomSelect
                       value={form.isActive ? '1' : '0'}
                       onChange={(e) => setForm({ ...form, isActive: e.target.value === '1' })}
                     >
                       <option value="1">Aktif</option>
                       <option value="0">Nonaktif</option>
-                    </select>
+                    </CustomSelect>
                   </div>
                   <div>
                     <label className="label">Tanggal Mulai *</label>
-                    <input
-                      className="input"
-                      type="date"
+                    <DateTimePicker
                       value={form.startDate}
-                      onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                      required
+                      onChange={(v) => setForm({ ...form, startDate: v })}
+                      mode="date"
+                      showIcon={false}
                     />
                   </div>
                   <div>
                     <label className="label">Tanggal Selesai (opsional)</label>
-                    <input
-                      className="input"
-                      type="date"
+                    <DateTimePicker
                       value={form.endDate}
-                      onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                      onChange={(v) => setForm({ ...form, endDate: v })}
+                      mode="date"
+                      showIcon={false}
+                      min={form.startDate || undefined}
                     />
                   </div>
                 </div>
@@ -274,10 +258,7 @@ export default function GelombangPage() {
                 </div>
               ))}
             </div>
-          </motion.div>
-        ) : (
-          <HistoryTab key="history" module="gelombang" title="Riwayat Penambahan & Perubahan Gelombang" />
-        )}
+        </motion.div>
       </AnimatePresence>
 
       {/* Modal konfirmasi hapus gelombang — pakai AnimatePresence agar

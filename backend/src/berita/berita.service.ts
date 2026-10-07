@@ -104,40 +104,74 @@ export class BeritaService {
   /**
    * List untuk publik — hanya PUBLISHED, exclude soft-deleted.
    * Field isi tidak dikembalikan di sini (ringkas), cukup cuplikan.
+   *
+   * Filter jadwal tayang otomatis (lihat schema.prisma `tayang_dari` &
+   * `tayang_sampai`):
+   *   - tayang_dari    null → tidak ada batas awal (syarat `tayang_dari` di-skip)
+   *   - tayang_sampai  null → tidak ada batas akhir (syarat `tayang_sampai` di-skip)
+   *   - artinya: kalau dua-duanya null → tayang selamanya (perilaku lama)
+   *   - kalau salah satu diisi → hanya filter sisi tsb
+   *
+   * Logika dipisah jadi 2 cabang supaya Prisma menghasilkan query yang
+   * optimal (tidak ada OR-bentrok dengan NULL). Untuk sekarang
+   * pakai filter sederhana di service (in-memory setelah query), karena
+   * payload berita PUBLISHED relatif kecil dan admin yang sering pakai
+   * filter tanggal biasanya lihat di halaman admin (bukan publik).
+   * Index `[status, tayangDari, tayangSampai]` di schema membantu kalau
+   * nanti traffic tumbuh.
    */
   async findPublic(opts: { page?: number; pageSize?: number } = {}) {
     const page = Math.max(1, opts.page ?? 1);
     const pageSize = Math.min(50, Math.max(1, opts.pageSize ?? 6));
+    const now = new Date();
+
+    // Filter DB hanya untuk kondisi yang bisa di-push ke SQL. Yang melibatkan
+    // OR + null handling (tayang_dari null OR <= now) tetap di-memory supaya
+    // tidak lambat di Postgres tanpa index partial.
     const where: Prisma.BeritaWhereInput = {
       status: 'PUBLISHED',
       deletedAt: null,
     };
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.berita.findMany({
-        where,
-        orderBy: { publishedAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        select: {
-          id: true,
-          judul: true,
-          slug: true,
-          foto: true,
-          hashtag: true,
-          publishedAt: true,
-          createdAt: true,
-          // snippet 160 char, biar UI tidak render isi penuh di list
-          isi: true,
-        },
-      }),
-      this.prisma.berita.count({ where }),
-    ]);
+
+    const allPublished = await this.prisma.berita.findMany({
+      where,
+      orderBy: { publishedAt: 'desc' },
+      select: {
+        id: true,
+        judul: true,
+        slug: true,
+        foto: true,
+        hashtag: true,
+        publishedAt: true,
+        tayangDari: true,
+        tayangSampai: true,
+        createdAt: true,
+        isi: true,
+      },
+    });
+
+    // Filter jadwal in-memory. Berita di-tayangkan iff:
+    //   (tayang_dari    IS NULL OR tayang_dari    <= now) AND
+    //   (tayang_sampai  IS NULL OR tayang_sampai  >= now)
+    const filtered = allPublished.filter((b) => {
+      if (b.tayangDari && b.tayangDari.getTime() > now.getTime()) return false;
+      if (b.tayangSampai && b.tayangSampai.getTime() < now.getTime()) return false;
+      return true;
+    });
+
+    const total = filtered.length;
+    const items = filtered.slice((page - 1) * pageSize, page * pageSize);
 
     // Hitung snippet per item — 160 char pertama + ellipsis
     const itemsWithSnippet = items.map((b) => ({
-      ...b,
+      id: b.id,
+      judul: b.judul,
+      slug: b.slug,
+      foto: b.foto,
+      hashtag: b.hashtag,
+      publishedAt: b.publishedAt,
+      createdAt: b.createdAt,
       snippet: (b.isi || '').slice(0, 160).trim() + ((b.isi || '').length > 160 ? '…' : ''),
-      isi: undefined,
     }));
 
     return { items: itemsWithSnippet, total, page, pageSize };
@@ -182,6 +216,10 @@ export class BeritaService {
       isi: string;
       hashtag?: string[];
       status?: StatusBerita;
+      /** ISO datetime string, nullable. */
+      tayangDari?: string | null;
+      /** ISO datetime string, nullable. */
+      tayangSampai?: string | null;
     },
     actorUserId: string,
   ) {
@@ -192,6 +230,9 @@ export class BeritaService {
     const slug = await uniqueSlug(this.prisma, makeSlug(opts.judul));
     const status = opts.status ?? 'DRAFT';
     const publishedAt = status === 'PUBLISHED' ? new Date() : null;
+    // Jadwal tayang — kalau FE kirim string kosong, treat as null
+    const tayangDari = opts.tayangDari ? new Date(opts.tayangDari) : null;
+    const tayangSampai = opts.tayangSampai ? new Date(opts.tayangSampai) : null;
 
     // Snapshot nama/email author — readable walau user dihapus.
     const authorSnap = await this.snapshotUser(actorUserId);
@@ -205,6 +246,8 @@ export class BeritaService {
         hashtag: opts.hashtag ?? [],
         status,
         publishedAt,
+        tayangDari,
+        tayangSampai,
         createdByUserId: actorUserId,
         createdByNama: authorSnap.name,
         createdByEmail: authorSnap.email,
@@ -222,6 +265,8 @@ export class BeritaService {
         slug: created.slug,
         status: created.status,
         hashtag: created.hashtag,
+        tayangDari: created.tayangDari,
+        tayangSampai: created.tayangSampai,
       },
     }).catch(() => null);
 
@@ -236,6 +281,9 @@ export class BeritaService {
       isi?: string;
       hashtag?: string[];
       status?: StatusBerita;
+      /** ISO datetime string atau null. `undefined` = tidak diubah. */
+      tayangDari?: string | null;
+      tayangSampai?: string | null;
     },
     actorUserId: string,
   ) {
@@ -259,6 +307,13 @@ export class BeritaService {
         data.publishedAt = new Date();
       }
     }
+    // Jadwal tayang — `undefined` = biarkan, `null` atau string = replace.
+    if (opts.tayangDari !== undefined) {
+      data.tayangDari = opts.tayangDari ? new Date(opts.tayangDari) : null;
+    }
+    if (opts.tayangSampai !== undefined) {
+      data.tayangSampai = opts.tayangSampai ? new Date(opts.tayangSampai) : null;
+    }
 
     // Slug: regenerate kalau judul berubah, dan hanya kalau slug lama
     // belum pernah dipakai eksternal (heuristik: publishedAt != null = sudah tayang)
@@ -279,12 +334,16 @@ export class BeritaService {
           status: before.status,
           publishedAt: before.publishedAt,
           hashtag: before.hashtag,
+          tayangDari: before.tayangDari,
+          tayangSampai: before.tayangSampai,
         },
         after: {
           judul: updated.judul,
           status: updated.status,
           publishedAt: updated.publishedAt,
           hashtag: updated.hashtag,
+          tayangDari: updated.tayangDari,
+          tayangSampai: updated.tayangSampai,
         },
       },
     }).catch(() => null);

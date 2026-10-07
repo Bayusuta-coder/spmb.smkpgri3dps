@@ -10,14 +10,18 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { ApiBearerAuth, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, JwtUserPayload } from '../common/decorators/current-user.decorator';
 import { LaporanService } from './laporan.service';
 
 class ManualTriggerDto {
   /** ISO date "YYYY-MM-DD" — kalau kosong, pakai hari ini */
+  @ApiPropertyOptional({ type: String, description: 'Tanggal referensi laporan (ISO YYYY-MM-DD). Kosongkan untuk hari ini' })
   date?: string;
 }
 
+@ApiTags('Laporan')
+@ApiBearerAuth('bearer')
 @Controller('laporan')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class LaporanController {

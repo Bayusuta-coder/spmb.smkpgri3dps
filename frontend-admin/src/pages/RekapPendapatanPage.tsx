@@ -13,6 +13,14 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatRupiah, METODE_PEMBAYARAN_LABELS } from '../lib/constants';
+import { CustomSelect } from '../components/CustomSelect';
+// NOTE: PengaturanHargaSection dulu di-embed di sini sebagai preview harga
+// saat Catat Pembayaran, tapi fitur edit/view harga sudah dipindah total
+// ke menu dedicated /pengaturan-harga (lihat PengaturanHargaPage.tsx).
+// Untuk menghindari duplikasi UI, section ini dihilangkan dari Bendahara.
+// Form "Catat Pembayaran" di PendaftarListPage / PendaftarDetailPage tetap
+// fetch harga sendiri lewat /settings/harga-daftar-ulang — tidak bergantung
+// pada komponen ini.
 
 interface RekapSummary {
   totalPendapatan: number;
@@ -401,8 +409,7 @@ export default function RekapPendapatanPage() {
           </div>
           <div>
             <label className="label">Gelombang</label>
-            <select
-              className="input"
+            <CustomSelect
               value={filters.gelombangId}
               onChange={(e) => onFilterChange('gelombangId', e.target.value)}
             >
@@ -412,19 +419,18 @@ export default function RekapPendapatanPage() {
                   {g.name}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
           </div>
           <div>
             <label className="label">Metode Pembayaran</label>
-            <select
-              className="input"
+            <CustomSelect
               value={filters.metode}
               onChange={(e) => onFilterChange('metode', e.target.value as RekapFilters['metode'])}
             >
               <option value="">— Semua Metode —</option>
               <option value="CASH">{METODE_PEMBAYARAN_LABELS.CASH}</option>
               <option value="TRANSFER">{METODE_PEMBAYARAN_LABELS.TRANSFER}</option>
-            </select>
+            </CustomSelect>
           </div>
         </div>
         <div className="mt-3 flex justify-end">

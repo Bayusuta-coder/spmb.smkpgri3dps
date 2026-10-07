@@ -154,7 +154,9 @@ function SuccessCard({ data, token }: { data: VerifyInfoResponse; token: string 
             <p className="mt-1 text-sm text-slate-700">
               <span className="font-mono font-semibold">{data.registrationNumber}</span>{' '}
               — <b>{data.namaLengkap}</b> (
-              {data.jenisKelamin === 'L' ? 'Laki-laki' : 'Perempuan'})
+              <span className="uppercase">
+                {data.jenisKelamin === 'L' ? 'Laki-laki' : 'Perempuan'}
+              </span>)
             </p>
             <span
               className={`mt-3 inline-block rounded-full px-3 py-1 text-xs font-medium ${STATUS_COLORS[data.status]}`}

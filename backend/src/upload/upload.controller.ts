@@ -7,6 +7,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UploadService } from './upload.service';
 import { Permissions } from '../common/decorators/permissions.decorator';
 
@@ -20,6 +21,8 @@ import { Permissions } from '../common/decorators/permissions.decorator';
  *   3. Response { relativePath, url }
  *   4. Submit form create berita/pengumuman dengan field `foto` = relativePath
  */
+@ApiTags('Upload')
+@ApiBearerAuth('bearer')
 @Controller('upload')
 export class UploadController {
   constructor(private readonly upload: UploadService) {}

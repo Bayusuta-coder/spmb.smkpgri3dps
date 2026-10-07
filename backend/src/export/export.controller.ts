@@ -1,8 +1,11 @@
 import { Body, Controller, Get, Post, Res } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { ExportService, DaftarUlangExportRequest } from './export.service';
 import { Permissions } from '../common/decorators/permissions.decorator';
 
+@ApiTags('Export')
+@ApiBearerAuth('bearer')
 @Controller('export')
 export class ExportController {
   constructor(private readonly service: ExportService) {}

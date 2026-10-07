@@ -26,7 +26,7 @@ import { getSchoolInfo } from '../common/constants/school';
  */
 const STATUS_LABELS: Record<StatusPendaftar, string> = {
   // BELUM + null  → siswa submit form, dua-duanya belum
-  MENUNGGU_PERSETUJUAN: 'Menunggu Daftar Ulang',
+  MENUNGGU_PERSETUJUAN: 'Belum Daftar Ulang',
   // BELUM + "M"  → ukuran baju sudah diinput TU, pembayaran belum
   MENUNGGU_PEMBAYARAN: 'Menunggu Pembayaran',
   // LUNAS + null → pembayaran sudah dicatat Bendahara, ukuran baju belum
@@ -274,6 +274,7 @@ export class PendaftarService {
         registrationNumber: created.registrationNumber,
         namaLengkap: created.namaLengkap,
         jenisKelamin: created.jenisKelamin,
+        agama: created.agama,
         tempatLahir: created.tempatLahir,
         tanggalLahir: created.tanggalLahir,
         nisn: created.nisn ?? undefined,
@@ -503,11 +504,15 @@ export class PendaftarService {
     if (p.pdfSignature !== signature) {
       throw new BadRequestException('Signature tidak valid');
     }
-    // Tahap 1 (status MENUNGGU_PERSETUJUAN) vs Tahap 2 (SISWA_AKTIF) — beda nama file
+    // 3 mode file: Tahap 1 (Tanda Bukti), BAYAR (Bukti Pembayaran), Tahap 2 (Bukti Pendaftaran Ulang).
+    // Nama file di-flash oleh status pendaftar saat download, bukan oleh isi PDF
+    // (PDF saat ini overwrite di pdfPath yang sama — yang berubah hanya filename).
     const filename =
       p.status === 'SISWA_AKTIF'
         ? `Bukti-Pendaftaran-Ulang-${p.registrationNumber}.pdf`
-        : `Tanda-Bukti-Pendaftaran-${p.registrationNumber}.pdf`;
+        : p.status === 'MENUNGGU_UKURAN_BAJU'
+          ? `Bukti-Pembayaran-${p.registrationNumber}.pdf`
+          : `Tanda-Bukti-Pendaftaran-${p.registrationNumber}.pdf`;
     return {
       absolutePath: this.pdf.getAbsolutePath(p.pdfPath),
       filename,
@@ -558,6 +563,53 @@ export class PendaftarService {
       this.prisma.pendaftar.count({ where }),
     ]);
 
+    // Hitung kelengkapan seragam untuk semua pendaftar di page ini (2 query
+    // groupBy paralel — satu untuk total item, satu untuk yang sudah di-
+    // centang). Return null untuk yang belum pernah submit checklist.
+    const pendaftarIds = items.map((p) => p.id);
+    const kelengkapanByPendaftar = new Map<
+      string,
+      { totalItems: number; sudahDidapat: number; belumDidapat: number; isLengkap: boolean }
+    >();
+    if (pendaftarIds.length > 0) {
+      const checklistToPendaftar = new Map<string, string>();
+      const checks = await this.prisma.seragamChecklist.findMany({
+        where: { pendaftarId: { in: pendaftarIds } },
+        select: { id: true, pendaftarId: true },
+      });
+      for (const c of checks) {
+        checklistToPendaftar.set(c.id, c.pendaftarId);
+      }
+      const checklistIds = Array.from(checklistToPendaftar.keys());
+      if (checklistIds.length > 0) {
+        const [totals, done] = await Promise.all([
+          this.prisma.seragamChecklistItem.groupBy({
+            by: ['checklistId'],
+            where: { checklistId: { in: checklistIds } },
+            _count: { _all: true },
+          }),
+          this.prisma.seragamChecklistItem.groupBy({
+            by: ['checklistId'],
+            where: { checklistId: { in: checklistIds }, sudahDidapat: true },
+            _count: { _all: true },
+          }),
+        ]);
+        const doneMap = new Map(done.map((d) => [d.checklistId, d._count._all]));
+        for (const t of totals) {
+          const pid = checklistToPendaftar.get(t.checklistId);
+          if (!pid) continue;
+          const totalItems = t._count._all;
+          const sudahDidapat = doneMap.get(t.checklistId) ?? 0;
+          kelengkapanByPendaftar.set(pid, {
+            totalItems,
+            sudahDidapat,
+            belumDidapat: totalItems - sudahDidapat,
+            isLengkap: totalItems > 0 && sudahDidapat === totalItems,
+          });
+        }
+      }
+    }
+
     return {
       items: items.map((p) => ({
         id: p.id,
@@ -594,11 +646,18 @@ export class PendaftarService {
         pdfSignature: p.pdfSignature,
         daftarUlangConfirmedAt: p.daftarUlangConfirmedAt,
         daftarUlangConfirmedBy: p.daftarUlangConfirmedBy,
+        // Badge kelengkapan seragam (compact view di list pendaftar).
+        // null = checklist belum pernah dibuat.
+        seragamKelengkapan: kelengkapanByPendaftar.get(p.id) ?? null,
         createdAt: p.createdAt,
       })),
       total,
       page,
       pageSize,
+      // Computed di backend sekali jalan supaya frontend tidak perlu duplicate
+      // logic Math.ceil. Selalu >= 1 supaya kontrol pagination tidak pernah
+      // dalam state 'no pages' yang bikin totalPages=0.
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
     };
   }
 
@@ -616,6 +675,39 @@ export class PendaftarService {
       },
     });
     if (!p) throw new NotFoundException('Pendaftar tidak ditemukan');
+
+    // Hitung kelengkapan item seragam (untuk badge di detail + list).
+    // - Kalau checklist belum pernah dibuat → null (section tampil "BELUM"
+    //   tanpa angka).
+    // - Kalau ada → return { totalItems, sudahDidapat, belumDidapat, isLengkap }.
+    // Query paralel dengan findUnique di atas via Promise.all supaya latency
+    // tidak bertambah kalau keduanya jalan bareng.
+    const checklist = await this.prisma.seragamChecklist.findUnique({
+      where: { pendaftarId: id },
+      select: {
+        items: {
+          select: { sudahDidapat: true },
+        },
+      },
+    });
+    let seragamKelengkapan: {
+      totalItems: number;
+      sudahDidapat: number;
+      belumDidapat: number;
+      isLengkap: boolean;
+    } | null = null;
+    if (checklist) {
+      const totalItems = checklist.items.length;
+      const sudahDidapat = checklist.items.filter((it) => it.sudahDidapat).length;
+      const belumDidapat = totalItems - sudahDidapat;
+      seragamKelengkapan = {
+        totalItems,
+        sudahDidapat,
+        belumDidapat,
+        isLengkap: totalItems > 0 && belumDidapat === 0,
+      };
+    }
+
     return {
       ...p,
       jumlahNilaiUn: p.jumlahNilaiUn?.toString() ?? null,
@@ -636,6 +728,7 @@ export class PendaftarService {
         p.daftarUlangConfirmedByNama,
         p.daftarUlangConfirmedByEmail,
       ),
+      seragamKelengkapan,
     };
   }
 
@@ -740,20 +833,50 @@ export class PendaftarService {
    * Endpoint: POST /pendaftar/:id/pembayaran body { metode: 'CASH' | 'TRANSFER' }
    * Permission: `spmb.bayar` (Bendahara role).
    */
-  async submitPembayaran(id: string, userId: string, metode: MetodePembayaran) {
+  async submitPembayaran(
+    id: string,
+    userId: string,
+    metode: MetodePembayaran,
+    /**
+     * Alasan edit — WAJIB diisi kalau pendaftar sudah SISWA_AKTIF (re-edit
+     * setelah status final). Untuk pendaftar baru, optional (default null).
+     * Disimpan ke audit log untuk forensik.
+     */
+    reason?: string,
+  ) {
     const p = await this.prisma.pendaftar.findUnique({ where: { id } });
     if (!p) throw new NotFoundException('Pendaftar tidak ditemukan');
-    if (p.status === 'DITOLAK' || p.status === 'SISWA_AKTIF') {
+    // DITOLAK tetap di-reject (kalau pendaftar ditolak, tidak boleh dicatat
+    // pembayarannya — logika bisnis inti). SISWA_AKTIF TIDAK lagi auto-reject
+    // (Opsi A) — boleh re-edit dengan audit log + reason wajib.
+    if (p.status === 'DITOLAK') {
       throw new BadRequestException(
         `Tidak bisa catat pembayaran untuk pendaftar berstatus ${STATUS_LABELS[p.status]}`,
       );
     }
+    const isReEditAfterActive = p.status === 'SISWA_AKTIF';
+    if (isReEditAfterActive && (!reason || !reason.trim())) {
+      throw new BadRequestException(
+        'Alasan perubahan wajib diisi untuk re-edit pembayaran setelah Siswa Aktif',
+      );
+    }
 
-    // Snapshot harga global saat Bendahara catat (bukan saat status berubah).
-    // PDF historical jadi konsisten walau superadmin ganti harga di kemudian hari.
+    // Snapshot harga ke pendaftar — SELALU dari Settings.harga_daftar_ulang
+    // (global). Tidak ada override per-siswa demi konsistensi struk, PDF &
+    // audit. Snapshot disimpan permanen walau superadmin ganti harga global
+    // setelahnya — transaksi lama tidak akan ikut berubah.
     const nominalSnapshot = await this.settings.hargaDaftarUlang();
+
     const updatedAt = new Date();
     const paySnap = await this.actorSnapshot(userId);
+
+    // Snapshot nilai LAMA sebelum update — untuk audit diff kalau re-edit
+    const beforeValues = {
+      metodePembayaran: p.metodePembayaran,
+      nominalPembayaran: p.nominalPembayaran?.toString() ?? null,
+      tanggalBayar: p.tanggalBayar,
+      dibayarOlehNama: p.dibayarOlehNama,
+    };
 
     await this.prisma.pendaftar.update({
       where: { id },
@@ -768,20 +891,34 @@ export class PendaftarService {
       },
     });
 
-    // Audit log
+    // Audit log — untuk re-edit setelah SISWA_AKTIF, catat before/after + reason.
+    // Untuk create pertama, log standar dengan nominal final.
+    const auditMeta: Record<string, any> = {
+      registrationNumber: p.registrationNumber,
+      metode,
+      nominal: nominalSnapshot,
+    };
+    if (isReEditAfterActive) {
+      auditMeta.editAfterActive = true;
+      auditMeta.reason = reason!.trim();
+      auditMeta.before = beforeValues;
+      auditMeta.after = {
+        metodePembayaran: metode,
+        nominalPembayaran: nominalSnapshot.toString(),
+        tanggalBayar: updatedAt,
+        dibayarOlehNama: paySnap.userName,
+      };
+    }
     await this.auditLog(
       userId,
       'pendaftar.payment_recorded',
       'pendaftar',
       id,
-      {
-        registrationNumber: p.registrationNumber,
-        metode,
-        nominal: nominalSnapshot,
-      },
+      auditMeta,
     );
 
-    // Recompute status (jika baju sudah terisi → flip ke SISWA_AKTIF + generate PDF)
+    // Recompute status (kalau baju sudah terisi → tetap SISWA_AKTIF; kalau
+    // ada perubahan status lain karena field baru, afterPartialSubmit handle)
     return this.afterPartialSubmit(id, userId, updatedAt);
   }
 
@@ -793,10 +930,18 @@ export class PendaftarService {
    * duluan antara Bendahara/TU tidak penting), pendaftar otomatis flip ke
    * `SISWA_AKTIF` dan PDF Tahap 2 + email dikirim.
    *
-   * Endpoint: POST /pendaftar/:id/ukuran-baju body { ukuranBaju }
+   * Endpoint: POST /pendaftar/:id/ukuran-baju body { ukuranBaju, reason? }
    * Permission: `spmb.ukuran_baju` (TU role).
+   *
+   * Opsi A: re-edit ukuran baju setelah Siswa Aktif DIIZINKAN dengan reason
+   * wajib dan audit log before/after.
    */
-  async submitUkuranBaju(id: string, userId: string, ukuranBaju: string) {
+  async submitUkuranBaju(
+    id: string,
+    userId: string,
+    ukuranBaju: string,
+    reason?: string,
+  ) {
     if (!ukuranBaju || !ukuranBaju.trim()) {
       throw new BadRequestException('Ukuran baju wajib diisi');
     }
@@ -809,14 +954,29 @@ export class PendaftarService {
 
     const p = await this.prisma.pendaftar.findUnique({ where: { id } });
     if (!p) throw new NotFoundException('Pendaftar tidak ditemukan');
-    if (p.status === 'DITOLAK' || p.status === 'SISWA_AKTIF') {
+    // DITOLAK tetap reject. SISWA_AKTIF boleh re-edit dengan reason wajib.
+    if (p.status === 'DITOLAK') {
       throw new BadRequestException(
         `Tidak bisa input ukuran baju untuk pendaftar berstatus ${STATUS_LABELS[p.status]}`,
+      );
+    }
+    const isReEditAfterActive = p.status === 'SISWA_AKTIF';
+    if (isReEditAfterActive && (!reason || !reason.trim())) {
+      throw new BadRequestException(
+        'Alasan perubahan wajib diisi untuk re-edit ukuran baju setelah Siswa Aktif',
       );
     }
 
     const updatedAt = new Date();
     const bajuSnap = await this.actorSnapshot(userId);
+
+    // Snapshot nilai LAMA sebelum update — untuk audit diff kalau re-edit
+    const beforeValues = {
+      ukuranBaju: p.ukuranBaju,
+      tanggalUkuranBaju: p.tanggalUkuranBaju,
+      ukuranBajuDisetOlehNama: p.ukuranBajuDisetOlehNama,
+    };
+
     await this.prisma.pendaftar.update({
       where: { id },
       data: {
@@ -828,19 +988,30 @@ export class PendaftarService {
       },
     });
 
-    // Audit log
+    // Audit log — untuk re-edit, sertakan before/after + reason
+    const auditMeta: Record<string, any> = {
+      registrationNumber: p.registrationNumber,
+      ukuranBaju: ukuranBaju.trim(),
+    };
+    if (isReEditAfterActive) {
+      auditMeta.editAfterActive = true;
+      auditMeta.reason = reason!.trim();
+      auditMeta.before = beforeValues;
+      auditMeta.after = {
+        ukuranBaju: ukuranBaju.trim(),
+        tanggalUkuranBaju: updatedAt,
+        ukuranBajuDisetOlehNama: bajuSnap.userName,
+      };
+    }
     await this.auditLog(
       userId,
       'pendaftar.ukuran_baju_recorded',
       'pendaftar',
       id,
-      {
-        registrationNumber: p.registrationNumber,
-        ukuranBaju: ukuranBaju.trim(),
-      },
+      auditMeta,
     );
 
-    // Recompute status (jika pembayaran juga LUNAS → flip ke SISWA_AKTIF + generate PDF)
+    // Recompute status
     return this.afterPartialSubmit(id, userId, updatedAt);
   }
 
@@ -854,7 +1025,7 @@ export class PendaftarService {
    * Asumsi: caller sudah update field masing-masing & audit log. Method ini
    * fokus pada recomputation + side effect (PDF + email).
    */
-  private async afterPartialSubmit(id: string, userId: string, _at: Date) {
+  public async afterPartialSubmit(id: string, userId: string, _at: Date) {
     const p = await this.prisma.pendaftar.findUnique({
       where: { id },
       include: {
@@ -893,15 +1064,39 @@ export class PendaftarService {
       });
     }
 
-    // Hanya generate PDF + kirim email saat baru mencapai SISWA_AKTIF.
-    // Partial state (MENUNGGU_PEMBAYARAN / MENUNGGU_UKURAN_BAJU) tidak kirim
-    // email apapun — sesuai klarifikasi user.
+    // PDF + email trigger logic (DESENTRALISASI — update 4 pasca-rapat sekolah):
+    //   - Jika pembayaran baru menjadi LUNAS (dan baju BELUM terisi):
+    //     → generate PDF mode 'BAYAR' (badge "SUDAH BAYAR") + kirim email "Bukti
+    //       Pembayaran" ke siswa. Siswa langsung bisa download PDF tanpa nunggu
+    //       ukuran baju.
+    //   - Jika status flip ke SISWA_AKTIF (kedua-duanya lengkap):
+    //     → generate PDF mode 'AKTIF' (badge "SISWA AKTIF") + kirim email
+    //       "Selamat!" ke siswa. PDF akan overwrite file Bukti Pembayaran
+    //       sebelumnya (pdfPath sama).
+    //
+    // Edge case: baju sudah terisi SEBELUM pembayaran → submitPembayaran
+    // langsung membuat newStatus = SISWA_AKTIF → branch kedua menang,
+    // skip Bukti Pembayaran intermediate (akan langsung overwrite).
     let pdfGenerated = false;
     let pdfSignature: string | null = null;
-    if (
-      newStatus === 'SISWA_AKTIF' &&
+
+    // `p` di sini adalah state SETELAH update di submitPembayaran / submitUkuranBaju,
+    // jadi `p.statusPembayaran === 'LUNAS'` artinya pembayaran baru saja tercatat,
+    // dan `p.ukuranBaju == null` artinya baju belum diisi (sehingga PDF Bukti
+    // Pembayaran yang harus dibuat, bukan Tahap 2/SISWA_AKTIF).
+    const justPaid = p.statusPembayaran === 'LUNAS' && p.ukuranBaju == null;
+    const willBeActive = newStatus === 'SISWA_AKTIF';
+
+    if (justPaid && !willBeActive) {
+      // Pembayaran selesai, baju belum — generate Bukti Pembayaran.
+      const result = await this.generateBuktiPembayaranPdf(updated, userId);
+      pdfGenerated = result.pdfGenerated;
+      pdfSignature = result.signature;
+    } else if (
+      willBeActive &&
       p.status !== 'SISWA_AKTIF'
     ) {
+      // Status flip ke SISWA_AKTIF (via pembayaran ATAU via ukuran baju).
       const result = await this.generateTahapan2Pdf(updated, userId);
       pdfGenerated = result.pdfGenerated;
       pdfSignature = result.signature;
@@ -961,6 +1156,7 @@ export class PendaftarService {
       registrationNumber: string;
       namaLengkap: string;
       jenisKelamin: 'L' | 'P';
+      agama?: string | null;
       tempatLahir: string;
       tanggalLahir: Date;
       nisn: string | null;
@@ -993,6 +1189,7 @@ export class PendaftarService {
         registrationNumber: p.registrationNumber,
         namaLengkap: p.namaLengkap,
         jenisKelamin: p.jenisKelamin,
+        agama: p.agama,
         tempatLahir: p.tempatLahir,
         tanggalLahir: p.tanggalLahir,
         nisn: p.nisn ?? undefined,
@@ -1083,6 +1280,159 @@ export class PendaftarService {
   }
 
   /**
+   * Generate PDF "Bukti Pembayaran" (Tahap 1.5, mode 'BAYAR') + kirim email
+   * ke siswa. Dipanggil dari `afterPartialSubmit()` saat pembayaran baru saja
+   * berubah ke LUNAS dan baju BELUM terisi — siswa boleh dapat bukti
+   * pembayaran langsung tanpa nunggu ukuran baju.
+   *
+   * PDF akan disimpan ke pdfPath yang sama dengan bukti lain (overwrite).
+   * Saat ukuran baju kemudian diisi oleh TU dan status flip ke SISWA_AKTIF,
+   * `generateTahapan2Pdf` dipanggil dan akan overwrite file ini dengan
+   * versi final.
+   *
+   * Returns metadata untuk caller (sama shape dengan `generateTahapan2Pdf`).
+   */
+  private async generateBuktiPembayaranPdf(
+    p: {
+      id: string;
+      registrationNumber: string;
+      namaLengkap: string;
+      jenisKelamin: 'L' | 'P';
+      agama?: string | null;
+      tempatLahir: string;
+      tanggalLahir: Date;
+      nisn: string | null;
+      sekolahAsal: string;
+      alamat: string;
+      noTelp: string;
+      namaIbu: string;
+      noTelpOrtu: string;
+      ukuranBaju: string | null;
+      nominalPembayaran: Prisma.Decimal | null;
+      metodePembayaran: 'CASH' | 'TRANSFER' | null;
+      tanggalBayar: Date | null;
+      dibayarOlehNama?: string | null;
+      dibayarOlehEmail?: string | null;
+      jumlahNilaiUn: Prisma.Decimal | null;
+      email: string | null;
+      jurusan: { code: string; name: string };
+      gelombang: {
+        name: string;
+        tanggalDaftarUlang: Date | null;
+        jamDaftarUlang: string | null;
+      };
+    },
+    _triggeredByUserId: string,
+  ): Promise<{ pdfGenerated: boolean; signature: string | null }> {
+    let pdfGenerated = false;
+    let pdfRelativePath: string | null = null;
+    let signature: string | null = null;
+
+    try {
+      const generated = await this.pdf.generateBuktiPendaftaranUlang({
+        mode: 'BAYAR',
+        registrationNumber: p.registrationNumber,
+        namaLengkap: p.namaLengkap,
+        jenisKelamin: p.jenisKelamin,
+        agama: p.agama,
+        tempatLahir: p.tempatLahir,
+        tanggalLahir: p.tanggalLahir,
+        nisn: p.nisn ?? undefined,
+        sekolahAsal: p.sekolahAsal,
+        alamat: p.alamat,
+        noTelp: p.noTelp,
+        namaIbu: p.namaIbu,
+        noTelpOrtu: p.noTelpOrtu,
+        // ukuranBaju sengaja TIDAK di-pass ke mode BAYAR (TU belum input)
+        ukuranBaju: undefined,
+        nominalPembayaran: p.nominalPembayaran?.toString() ?? null,
+        metodePembayaran: p.metodePembayaran,
+        tanggalBayar: p.tanggalBayar,
+        dibayarOleh: p.dibayarOlehNama
+          ? { name: p.dibayarOlehNama, email: p.dibayarOlehEmail || '' }
+          : null,
+        jurusan: p.jurusan,
+        gelombang: p.gelombang,
+        approvedAt: p.tanggalBayar || new Date(),
+        approvedBy: p.dibayarOlehNama
+          ? { name: p.dibayarOlehNama, email: p.dibayarOlehEmail || '' }
+          : undefined,
+        jumlahNilaiUn:
+          p.jumlahNilaiUn != null ? Number(p.jumlahNilaiUn) : null,
+      });
+      pdfRelativePath = generated.relativePath;
+      signature = generated.signature;
+
+      await this.prisma.pendaftar.update({
+        where: { id: p.id },
+        data: {
+          pdfPath: generated.relativePath,
+          pdfSignature: generated.signature,
+          pdfGeneratedAt: new Date(),
+        },
+      });
+
+      await this.auditLog(
+        null,
+        'spmb.pdf_generated_tahap_bayar',
+        'spmb',
+        p.id,
+        {
+          registrationNumber: p.registrationNumber,
+          pdfPath: generated.relativePath,
+          nominal: p.nominalPembayaran?.toString() ?? null,
+          metode: p.metodePembayaran,
+        },
+      );
+
+      pdfGenerated = true;
+    } catch (e: any) {
+      // Gagal generate PDF TIDAK menggagalkan approval pembayaran —
+      // siswa tetap tercatat LUNAS, status akan tetap MENUNGGU_UKURAN_BAJU,
+      // admin bisa regenerate dari UI nanti.
+      this.logger.error(
+        `Gagal generate PDF Bukti Pembayaran untuk ${p.registrationNumber}: ${e.message}`,
+      );
+      await this.auditLog(
+        null,
+        'spmb.pdf_generated_failed',
+        'spmb',
+        p.id,
+        {
+          registrationNumber: p.registrationNumber,
+          mode: 'BAYAR',
+          error: e?.message,
+        },
+      );
+    }
+
+    // Kirim email ke siswa (jika ada) — best-effort, jangan gagalkan flow.
+    if (pdfGenerated && signature && p.email) {
+      const filename = `Bukti-Pembayaran-${p.registrationNumber}.pdf`;
+      const attachment = pdfRelativePath
+        ? [{ filename, path: this.pdf.getAbsolutePath(pdfRelativePath), contentType: 'application/pdf' }]
+        : undefined;
+
+      this.email
+        .sendBuktiPembayaran(
+          p.email,
+          p.registrationNumber,
+          p.nominalPembayaran?.toString() ?? '0',
+          p.dibayarOlehNama || undefined,
+          p.dibayarOlehEmail || undefined,
+          signature,
+          attachment,
+          { metodePembayaran: p.metodePembayaran },
+        )
+        .catch((e) =>
+          this.logger.warn(`Email bukti pembayaran gagal: ${e?.message}`),
+        );
+    }
+
+    return { pdfGenerated, signature };
+  }
+
+  /**
    * Scan QR pendaftar saat datang daftar ulang fisik ke sekolah.
    * Validasi signature dari QR cocok dengan DB dan pendaftar berstatus SISWA_AKTIF.
    */
@@ -1153,16 +1503,31 @@ export class PendaftarService {
   /**
    * Download PDF by pendaftar ID (admin-only, tanpa butuh signature token).
    * Return path absolut + filename untuk streaming di controller.
+   *
+   * Update 4: setelah desentralisasi approval, PDF bisa tersedia lebih awal
+   * (begitu LUNAS — Bukti Pembayaran). Jadi gating dilonggarkan: izinkan
+   * download selama `statusPembayaran === 'LUNAS'` ATAU `status === 'SISWA_AKTIF'`
+   * (yang sebenarnya subset, tapi defensive). Pendaftar yang baru submit dan
+   * belum bayar tetap belum punya pdfPath — error 404 menjelaskan itu.
    */
   async downloadPdfById(id: string): Promise<{ absolutePath: string; filename: string }> {
     const p = await this.prisma.pendaftar.findUnique({
       where: { id },
-      select: { pdfPath: true, registrationNumber: true, status: true },
+      select: {
+        pdfPath: true,
+        registrationNumber: true,
+        status: true,
+        statusPembayaran: true,
+        ukuranBaju: true,
+      },
     });
     if (!p) throw new NotFoundException('Pendaftar tidak ditemukan');
-    if (p.status !== 'SISWA_AKTIF') {
+    // PDF bisa di-download segera setelah pembayaran (Bukti Pembayaran)
+    // maupun setelah keduanya lengkap (Bukti Pendaftaran Ulang).
+    // Yang TIDAK boleh: pendaftar yang belum bayar sama sekali.
+    if (p.statusPembayaran !== 'LUNAS' && p.status !== 'SISWA_AKTIF') {
       throw new BadRequestException(
-        `Pendaftar belum berstatus SISWA_AKTIF — PDF belum tersedia`,
+        'Bukti PDF belum tersedia — pendaftar belum tercatat melakukan pembayaran',
       );
     }
     if (!p.pdfPath) {
@@ -1202,24 +1567,64 @@ export class PendaftarService {
           select: { name: true, tanggalDaftarUlang: true, jamDaftarUlang: true },
         },
         approvedBy: { select: { name: true, email: true } },
+        dibayarOleh: { select: { name: true, email: true } },
       },
     });
     if (!p) throw new NotFoundException('Pendaftar tidak ditemukan');
-    if (p.status !== 'SISWA_AKTIF') {
+
+    // Update 4: izinkan regenerate untuk SISWA_AKTIF dan MENUNGGU_UKURAN_BAJU.
+    // - SISWA_AKTIF → regenerate Tahap 2 (Bukti Pendaftaran Ulang)
+    // - MENUNGGU_UKURAN_BAJU → regenerate Bukti Pembayaran (siswa sudah bayar, baju belum)
+    // PDF lama di-overwrite.
+    const regeneratable =
+      p.status === 'SISWA_AKTIF' || p.status === 'MENUNGGU_UKURAN_BAJU';
+    if (!regeneratable) {
       throw new BadRequestException(
-        `Hanya pendaftar berstatus SISWA_AKTIF yang bisa regenerate PDF ` +
-          `(saat ini: ${STATUS_LABELS[p.status]})`,
+        `PDF hanya bisa di-regenerate untuk pendaftar berstatus SISWA_AKTIF atau ` +
+          `MENUNGGU_UKURAN_BAJU (saat ini: ${STATUS_LABELS[p.status]})`,
       );
     }
 
-    const result = await this.generateTahapan2Pdf(p, adminUserId);
+    let result: { pdfGenerated: boolean; signature: string | null };
+    if (p.status === 'SISWA_AKTIF') {
+      result = await this.generateTahapan2Pdf(p, adminUserId);
+    } else {
+      // MENUNGGU_UKURAN_BAJU → Bukti Pembayaran
+      result = await this.generateBuktiPembayaranPdf(
+        {
+          id: p.id,
+          registrationNumber: p.registrationNumber,
+          namaLengkap: p.namaLengkap,
+          jenisKelamin: p.jenisKelamin,
+          tempatLahir: p.tempatLahir,
+          tanggalLahir: p.tanggalLahir,
+          nisn: p.nisn,
+          sekolahAsal: p.sekolahAsal,
+          alamat: p.alamat,
+          noTelp: p.noTelp,
+          namaIbu: p.namaIbu,
+          noTelpOrtu: p.noTelpOrtu,
+          ukuranBaju: p.ukuranBaju,
+          nominalPembayaran: p.nominalPembayaran,
+          metodePembayaran: p.metodePembayaran,
+          tanggalBayar: p.tanggalBayar,
+          dibayarOlehNama: p.dibayarOlehNama,
+          dibayarOlehEmail: p.dibayarOlehEmail,
+          jumlahNilaiUn: p.jumlahNilaiUn,
+          email: p.email,
+          jurusan: p.jurusan,
+          gelombang: p.gelombang,
+        },
+        adminUserId,
+      );
+    }
 
-    // Audit log khusus regenerate (selain spmb.pdf_generated_tahap2 yang
-    // sudah di-emit oleh helper) supaya trace "siapa klik tombol Generate
+    // Audit log khusus regenerate supaya trace "siapa klik tombol Generate
     // Ulang" lebih jelas di audit trail.
     await this.auditLog(adminUserId, 'spmb.pdf_regenerated', 'spmb', id, {
       registrationNumber: p.registrationNumber,
       reason: 'manual regenerate',
+      status: p.status,
       pdfGenerated: result.pdfGenerated,
     });
 

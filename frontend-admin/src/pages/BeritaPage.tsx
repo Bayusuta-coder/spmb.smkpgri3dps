@@ -1,14 +1,20 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Trash2, History, ListChecks, Edit3, Eye, RotateCcw, Send } from 'lucide-react';
+import { Plus, Trash2, Edit3, Eye, RotateCcw, Send, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, fotoUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { BERITA_STATUS_COLORS, BERITA_STATUS_LABELS } from '../lib/constants';
 import UploadFotoField from '../components/UploadFotoField';
-import HistoryTab from '../components/HistoryTab';
+import { CustomSelect } from '../components/CustomSelect';
+import {
+  DateTimePicker,
+  isoToLocalInput,
+  localInputToIso,
+} from '../components/DateTimePicker';
 
-type Tab = 'list' | 'history';
+// Tab "Riwayat Perubahan" dihapus (F3) — histori Berita (action `berita.*`)
+// bisa dilihat via Audit Log → filter module=Berita.
 
 interface Berita {
   id: string;
@@ -22,6 +28,10 @@ interface Berita {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  /** ISO datetime — berita mulai tampil otomatis di publik. Null = langsung. */
+  tayangDari: string | null;
+  /** ISO datetime — berita berhenti tampil otomatis di publik. Null = unlimited. */
+  tayangSampai: string | null;
   createdBy?: { name: string; email: string };
 }
 
@@ -31,6 +41,10 @@ interface FormState {
   isi: string;
   hashtagText: string;
   status: 'DRAFT' | 'PUBLISHED';
+  /** Format native datetime-local: "YYYY-MM-DDTHH:mm" atau ''. */
+  tayangDari: string;
+  /** Format native datetime-local: "YYYY-MM-DDTHH:mm" atau ''. */
+  tayangSampai: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -39,11 +53,12 @@ const EMPTY_FORM: FormState = {
   isi: '',
   hashtagText: '',
   status: 'DRAFT',
+  tayangDari: '',
+  tayangSampai: '',
 };
 
 export default function BeritaPage() {
   const { hasPermission } = useAuth();
-  const [tab, setTab] = useState<Tab>('list');
   const [items, setItems] = useState<Berita[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -88,6 +103,8 @@ export default function BeritaPage() {
       isi: b.isi,
       hashtagText: (b.hashtag || []).join(' '),
       status: b.status,
+      tayangDari: isoToLocalInput(b.tayangDari, 'datetime'),
+      tayangSampai: isoToLocalInput(b.tayangSampai, 'datetime'),
     });
     setShowForm(true);
   };
@@ -96,6 +113,16 @@ export default function BeritaPage() {
     e.preventDefault();
     if (!form.foto) {
       toast.error('Foto wajib diupload');
+      return;
+    }
+    // Client-side validation — kalau sampai < dari, blok submit.
+    // (Backend juga validasi via @Validate, tapi UX lebih baik kalau di sini.)
+    if (
+      form.tayangDari &&
+      form.tayangSampai &&
+      form.tayangSampai < form.tayangDari
+    ) {
+      toast.error('Tayang Sampai tidak boleh lebih awal dari Tayang Dari.');
       return;
     }
     const payload = {
@@ -108,6 +135,11 @@ export default function BeritaPage() {
         .filter(Boolean)
         .map((s) => (s.startsWith('#') ? s : '#' + s)),
       status: form.status,
+      // ISO datetime string atau null — backend simpan apa adanya.
+      // Frontend kirim ISO dengan detik (lihat helper) supaya Prisma DateTime
+      // tidak bergantung pada interpretasi backend soal detik=0 vs tidak ada.
+      tayangDari: localInputToIso(form.tayangDari),
+      tayangSampai: localInputToIso(form.tayangSampai),
     };
     try {
       if (editingId) {
@@ -165,38 +197,22 @@ export default function BeritaPage() {
           <h1 className="text-2xl font-bold text-slate-900">Manajemen Berita</h1>
           <p className="text-sm text-slate-500">Artikel & info untuk halaman publik.</p>
         </div>
-        {tab === 'list' && hasPermission('berita.manage') && (
+        {hasPermission('berita.manage') && (
           <button onClick={showForm ? () => setShowForm(false) : openCreate} className="btn-primary">
             <Plus size={16} /> {showForm ? 'Tutup' : 'Berita Baru'}
           </button>
         )}
       </div>
 
-      <div className="mb-4 flex gap-1 rounded-lg bg-slate-200 p-1">
-        <button
-          onClick={() => setTab('list')}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
-            tab === 'list' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <ListChecks size={16} /> Daftar Berita
-        </button>
-        <button
-          onClick={() => setTab('history')}
-          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
-            tab === 'history' ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <History size={16} /> Riwayat
-        </button>
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold text-slate-700">Daftar Berita</h2>
       </div>
 
       <AnimatePresence mode="wait">
-        {tab === 'list' ? (
-          <motion.div
-            key="list"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
+        <motion.div
+          key="list"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
           >
@@ -221,15 +237,61 @@ export default function BeritaPage() {
                   </div>
                   <div>
                     <label className="label">Status</label>
-                    <select
-                      className="input"
+                    <CustomSelect
                       value={form.status}
                       onChange={(e) => setForm({ ...form, status: e.target.value as any })}
                     >
                       <option value="DRAFT">Draft (belum tampil di publik)</option>
                       <option value="PUBLISHED">Published (langsung tayang)</option>
-                    </select>
+                    </CustomSelect>
                   </div>
+                </div>
+
+                {/* Jadwal Tayang — kontrol granular kapan berita otomatis
+                    muncul/hilang di publik, tanpa harus admin ubah status manual.
+                    • Status PUBLISHED + kedua field kosong → tayang terus
+                      (perilaku lama, backward-compat)
+                    • tayang_dari diisi → hanya muncul mulai waktu tsb
+                    • tayang_sampai diisi → hilang otomatis setelah lewat
+                    Filter jadwal diterapkan di service.findPublic() publik. */}
+                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Clock size={14} className="text-slate-500" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                      Jadwal Tayang (Otomatis)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="label">Tayang Dari</label>
+                      <DateTimePicker
+                        containerClassName=""
+                        value={form.tayangDari}
+                        onChange={(v) => setForm({ ...form, tayangDari: v })}
+                        mode="datetime"
+                      />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Kosongkan = langsung tayang saat berstatus Published.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="label">Tayang Sampai</label>
+                      <DateTimePicker
+                        value={form.tayangSampai}
+                        onChange={(v) => setForm({ ...form, tayangSampai: v })}
+                        mode="datetime"
+                        min={form.tayangDari || undefined}
+                      />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Kosongkan = tidak ada batas akhir (tayang selamanya).
+                      </p>
+                    </div>
+                  </div>
+                  {form.tayangDari && form.tayangSampai && form.tayangSampai < form.tayangDari && (
+                    <p className="mt-2 text-xs font-medium text-red-600">
+                      ⚠ Tayang Sampai tidak boleh lebih awal dari Tayang Dari.
+                    </p>
+                  )}
                 </div>
 
                 <UploadFotoField
@@ -280,15 +342,15 @@ export default function BeritaPage() {
             )}
 
             <div className="mb-3 flex flex-wrap items-center gap-3">
-              <select
-                className="input max-w-[180px]"
+              <CustomSelect
+                className="max-w-[180px]"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as any)}
               >
                 <option value="ALL">Semua status</option>
                 <option value="DRAFT">Draft</option>
                 <option value="PUBLISHED">Published</option>
-              </select>
+              </CustomSelect>
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input
                   type="checkbox"
@@ -374,6 +436,24 @@ export default function BeritaPage() {
                                 pub: {new Date(b.publishedAt).toLocaleDateString('id-ID')}
                               </div>
                             )}
+                            {(b.tayangDari || b.tayangSampai) && (
+                              <div className="mt-0.5 inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                                <Clock size={10} />
+                                {b.tayangDari
+                                  ? new Date(b.tayangDari).toLocaleDateString('id-ID', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                    })
+                                  : '∞'}
+                                {' → '}
+                                {b.tayangSampai
+                                  ? new Date(b.tayangSampai).toLocaleDateString('id-ID', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                    })
+                                  : '∞'}
+                              </div>
+                            )}
                           </td>
                           {hasPermission('berita.manage') && (
                             <td className="table-td">
@@ -432,10 +512,7 @@ export default function BeritaPage() {
                 </table>
               </div>
             </div>
-          </motion.div>
-        ) : (
-          <HistoryTab key="history" module="berita" title="Riwayat Perubahan Berita" />
-        )}
+        </motion.div>
       </AnimatePresence>
     </div>
   );
